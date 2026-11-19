@@ -99,9 +99,11 @@ There is no automatic cold-region selector or scheduler, and no production
 caller currently invokes this API. The companion CLI can seed an initial
 catalog, list age-eligible regions, and dry-run a local world-data budget plan.
 Paper refuses offload if its access tracker is unhealthy; the CLI rechecks the
-persisted access age while Paper's lease is held. The planner does not measure
-Luna headroom, call the offload API, or schedule offloads. Automatic eviction
-remains disabled; do not invoke it on Fiesta until budget policy,
+persisted access age while Paper's lease is held. The planner reads an unlocked
+advisory Luna usage snapshot and caps its estimate by reported headroom; each
+actual upload still enforces quota under the remote writer lock. It does not
+call the offload API or schedule offloads.
+Automatic eviction remains disabled; do not invoke it on Fiesta until budget policy,
 restart/crash recovery, and concurrency behavior pass disposable-server tests.
 
 The patches build as part of the isolated Paper 1.21.11 checkout. A restore
@@ -119,7 +121,7 @@ file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
 exceptions. The isolated Paper 1.21.11 checkout compiled successfully with
-`:paper-server:compileJava`; the standalone Java fixtures pass, and all 39
+`:paper-server:compileJava`; the standalone Java fixtures pass, and all 43
 companion Python unit tests pass. A separate Linux fixture confirmed that the
 Java process lock is observed by Python's `fcntl.lockf` check.
 It has not been installed on Fiesta, tested against Luna, or exercised in a
