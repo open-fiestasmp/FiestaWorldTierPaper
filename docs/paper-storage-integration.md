@@ -88,13 +88,18 @@ tick dispatch and invocation of the leased API were exercised using a fake CLI
 shim. After the batched transport change, a disposable Paper 1.21.11 server
 restored a synthetic spawn-region bundle from Luna after `/forceload add`
 requested the marked chunk. The restored region SHA-256 matched the original,
-the durable marker cleared, and
-the remote test object was consumed; the unique test root was then removed.
-This test used an isolated world and did not touch Fiesta world data. Crash and
-outage recovery, concurrent player movement, player-facing restore latency,
-and production-scale transfers remain untested. The scheduler is not installed
-on Fiesta. Do not enable offloading on a live world until those remaining gates
-pass on disposable copies.
+the durable marker cleared, and the remote test object was consumed. A separate
+post-change probe requested an 8 KiB synthetic region through
+`World.getChunkAtAsync`: the callback completed in 23.2 seconds, the marker
+cleared, the remote object was consumed, the access tracker initialized cleanly,
+and a one-tick monitor saw no gap above 500 ms. Its zero-byte local free-space
+reserve was configured only for the disposable test. Both tests used unique
+temporary objects and isolated worlds, and did not touch Fiesta data. These
+checks validate one restore path; they do not establish normal-region
+throughput or player-facing latency. Crash and outage recovery, concurrent
+player movement, and production-scale transfers remain untested. The scheduler
+is not installed on Fiesta. Do not enable offloading on a live world until
+those remaining gates pass on disposable copies.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk

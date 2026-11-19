@@ -121,13 +121,17 @@ past that threshold. The scheduler is not installed on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
 Paper server with a fake CLI shim. After the batched transport change, a
 disposable Paper 1.21.11 server restored a synthetic spawn-region bundle from
-Luna after `/forceload add` requested the marked chunk. The restored region
-SHA-256 matched the original,
-the durable marker cleared, and the remote test object was consumed; the unique
-test root was then removed. This used an isolated world and did not touch Fiesta
-world data. Crash recovery, outage recovery, concurrent player movement,
-player-facing restore latency, and production-scale region transfers remain
-unverified. Automatic eviction stays off on Fiesta until those gates pass.
+Luna after `/forceload add` requested the marked chunk. Its hash matched, the
+marker cleared, and the remote object was consumed. A separate post-change
+probe requested an 8 KiB synthetic region through Paper's asynchronous chunk
+API: the callback completed in 23.2 seconds, the marker cleared, the remote
+object was consumed, the access tracker initialized cleanly, and a tick monitor
+saw no gap above 500 ms. The zero-byte free-space reserve was test-only in the
+disposable configuration. Both tests used isolated worlds and did not touch
+Fiesta data. They do not measure normal-region throughput or player-facing
+latency. Crash recovery, outage recovery, concurrent player movement, and
+production-scale region transfers remain unverified. Automatic eviction stays
+off on Fiesta until those gates pass.
 
 The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
@@ -150,7 +154,7 @@ closed, and the tier-failure type remains detectable through wrapped
 exceptions. The complete isolated Paper 1.21.11 checkout applied all seven
 patches and built `createMojmapBundlerJar`; the bundled server JAR contains the
 restore, lease, offload, access-tracker, and scheduler classes. The standalone
-Java fixtures pass, all 46 companion Python unit tests pass, and a separate
+Java fixtures pass, all 51 companion Python unit tests pass, and a separate
 Linux fixture confirmed that Python observes the Java process lock with
 `fcntl.lockf`.
 
@@ -164,9 +168,10 @@ multiplexed store attempt timed out, though a subsequent complete run passed;
 transport stalls still need retry and outage testing.
 
 This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. The earlier disposable Paper restore through Luna
-predates the batched transport change; repeating that forced-load scenario is
-still required before considering deployment.
+world data was transferred. The `/forceload add` restore check covers the
+batched transport path, while the later asynchronous API probe confirms one
+demand restore without a measured server tick stall. Neither establishes live
+player latency or production rollout readiness.
 
 ## License
 
