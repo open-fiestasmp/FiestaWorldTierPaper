@@ -121,7 +121,8 @@ past that threshold. The scheduler is not installed on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
 Paper server with a fake CLI shim. After the batched transport change, a
 disposable Paper 1.21.11 server restored a synthetic spawn-region bundle from
-Luna on a forced chunk load. The restored region SHA-256 matched the original,
+Luna after `/forceload add` requested the marked chunk. The restored region
+SHA-256 matched the original,
 the durable marker cleared, and the remote test object was consumed; the unique
 test root was then removed. This used an isolated world and did not touch Fiesta
 world data. Crash recovery, outage recovery, concurrent player movement,

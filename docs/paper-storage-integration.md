@@ -86,8 +86,9 @@ asking Paper for the exclusive region lease. Paper patch `0039` refuses offload
 after an access-tracking failure. On a disposable Paper server, the scheduler's
 tick dispatch and invocation of the leased API were exercised using a fake CLI
 shim. After the batched transport change, a disposable Paper 1.21.11 server
-restored a synthetic spawn-region bundle from Luna on a forced chunk load. The
-restored region SHA-256 matched the original, the durable marker cleared, and
+restored a synthetic spawn-region bundle from Luna after `/forceload add`
+requested the marked chunk. The restored region SHA-256 matched the original,
+the durable marker cleared, and
 the remote test object was consumed; the unique test root was then removed.
 This test used an isolated world and did not touch Fiesta world data. Crash and
 outage recovery, concurrent player movement, player-facing restore latency,
