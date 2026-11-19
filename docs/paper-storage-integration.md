@@ -194,9 +194,8 @@ measured 0.50 seconds for manifest read, 5.45 seconds for verified fetch, and
 root was removed. These store stages total 7.97 seconds. The post-optimization
 synthetic-region Paper callback took 27.379 seconds; the gap is unexplained.
 Later saved-chunk testing against Luna passed, with an 8.5-second restore.
-Automatic offloading remains disabled on Fiesta until restart/crash recovery,
-outage behavior, and player-facing movement/latency are tested on disposable
-copies.
+Automatic offloading remains disabled on Fiesta until crash recovery and
+player-facing movement/latency are tested on disposable copies.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
@@ -219,3 +218,18 @@ test root was removed. This confirms the new streamed fetch works at the Paper
 hook boundary as well as through the standalone store API. The run used only a
 synthetic test world; it did not touch Fiesta's production world or measure a
 connected player's wait time.
+
+### Luna outage and retry recovery
+
+On 2026-11-19, a second disposable Paper server tested a remote outage against
+a saved chunk in region `r.10.10`, away from spawn. With the chunk marked
+`REMOTE_ONLY` and the local region file absent, the test pointed only its
+private config at a closed localhost port. Paper surfaced
+`FiestaWorldTierRestoreException`, stopped that chunk load, and did not create
+an empty replacement region; the remote marker and bundle remained available.
+After restoring the test config's Luna endpoint, the restore command fetched
+the same region, cleared the marker, and returned remote test usage to zero.
+A fresh Paper process loaded the saved gold block successfully. The unique
+remote and local test roots were then removed. This validates fail-closed
+outage behavior and a later retry on disposable data, but not a process crash
+during transfer, live-player latency, or production rollout.

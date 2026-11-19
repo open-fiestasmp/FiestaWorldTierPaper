@@ -153,8 +153,9 @@ gold-block chunk was offloaded and restored with its block intact; the marker
 cleared, the local region was present, and the fixture's remote copy was
 removed. This validates concurrent access and saved-chunk restore against the
 local fixture. It is not a connected-player, Luna-network, or player-facing
-latency test. Crash/outage recovery, normal-region throughput, and production-
-scale transfers remain unverified. Automatic eviction stays off on Fiesta.
+latency test. Paper process crash recovery, normal-region throughput, and
+production-scale transfers remain unverified. Automatic eviction stays off on
+Fiesta.
 
 A subsequent disposable Paper 1.21.11 run used a dedicated temporary object
 root on the actual Luna host. With SSH multiplexing enabled, a 1.19 MiB region
@@ -164,9 +165,10 @@ maximum tick gap was 61 ms. A separate 651 KiB saved region offloaded and
 restored with the gold block intact and marker cleared. Publish took 17.1 s
 and restore 8.5 s; without multiplexing, the same region took 41.0 s and
 29.8 s. This was an internal chunk request, not a player session, and the
-restore delay remains noticeable. Crash/outage recovery and player-facing
-latency still need validation. Test roots were removed; Fiesta's live worlds
-were untouched.
+restore delay remains noticeable. This was an internal chunk request, not a
+player session. The later outage test below verifies fail-closed behavior and
+retry after reconnect, but player-facing latency still needs validation. Test
+roots were removed; Fiesta's live worlds were untouched.
 
 A follow-up direct SFTP benchmark downloaded the same 651 KiB synthetic region
 twice with each buffer setting. The default 32 KiB buffer took 5.12 and 4.07
@@ -223,7 +225,12 @@ Linux fixture confirmed that Python observes the Java process lock with
 
 The compiled bundle also started in a disposable localhost-only Paper instance,
 created its three dimensions, reached `Done`, and shut down cleanly. This checks
-startup only; it does not exercise a remote-region restore or production data.
+startup only; the later saved-region and outage tests below exercise remote
+restore behavior. They still use disposable data, not production worlds.
+
+The manual Paper runtime probe and setup notes are in
+[`tests/e2e`](tests/e2e/README.md). It needs a private test configuration and
+must only be run against a disposable world and remote object root.
 
 A synthetic 1,048,607-byte region bundle also passed publish, manifest/hash
 read, verified batched fetch, checksum comparison, and hash-guarded deletion on
@@ -232,13 +239,15 @@ SSH multiplexing enabled, the measured phases were 26.6 seconds to publish,
 3.1 seconds to read the manifest, 9.4 seconds to fetch the complete bundle,
 and 9.0 seconds to delete it. Read plus fetch used two SFTP batches. One earlier
 multiplexed store attempt timed out, though a subsequent complete run passed;
-transport stalls still need retry and outage testing.
+mid-transfer interruption and retry behavior still need more testing.
 
 This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. The `/forceload add` restore check covers the
-batched transport path, while the later asynchronous API probe confirms one
-demand restore without a measured server tick stall. Neither establishes live
-player latency or production rollout readiness.
+world data was transferred. A later disposable Paper hook test verified a
+saved chunk restore from Luna, then verified that an unreachable endpoint
+fails closed and that the same chunk can be restored after reconnecting. The
+`/forceload add` check covers the batched transport path, while the asynchronous
+API probe confirms one demand restore without a measured server tick stall.
+None of these establish live player latency or production rollout readiness.
 
 ## License
 

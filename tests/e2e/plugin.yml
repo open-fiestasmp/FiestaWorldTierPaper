@@ -1,0 +1,4 @@
+name: FiestaTierE2E
+version: 1.0
+main: org.openfiestasmp.worldtier.test.FiestaTierE2E
+api-version: '1.21'
