@@ -106,6 +106,21 @@ concurrent player movement, and production-scale transfers remain untested. The
 scheduler is not installed on Fiesta. Do not enable offloading on a live world
 until those remaining gates pass on disposable copies.
 
+A follow-up changed small manifest reads to use stdout over the pinned SSH
+connection instead of a separate SFTP transfer. A real Luna store smoke test
+with a different synthetic 8 KiB bundle measured 0.50 seconds for manifest
+read, 5.40 seconds for verified fetch, and 4.43 seconds for hash-guarded
+deletion. The fetched SHA-256 matched and the unique remote test root was
+removed. This does not remeasure the Paper asynchronous callback; its last
+end-to-end result remains 15.4 seconds.
+
+A second pass changed hash-guarded deletion from SFTP to one SSH command while
+holding the remote writer lock. A new isolated Luna smoke test measured 0.50
+seconds for manifest read, 5.45 seconds for verified fetch, and 2.02 seconds
+for deletion. The SHA-256 matched and the test root was removed. These store
+stages total 7.97 seconds; Paper's end-to-end callback has not yet been
+remeasured after the transport optimizations.
+
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
 reserve check fails, the operation returns a typed I/O error and leaves the

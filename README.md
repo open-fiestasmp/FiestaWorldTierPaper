@@ -140,6 +140,21 @@ outage recovery, concurrent player movement, and production-scale region
 transfers remain unverified. Automatic eviction stays off on Fiesta until those
 gates pass.
 
+A follow-up changed small manifest reads to use stdout over the pinned SSH
+connection instead of a separate SFTP transfer. A real Luna smoke test using a
+different synthetic 8 KiB bundle measured 0.50 seconds for manifest read, 5.40
+seconds for verified fetch, and 4.43 seconds for hash-guarded deletion. The
+downloaded SHA-256 matched and the test root was removed. This measured only
+the store operations; the Paper asynchronous callback has not yet been
+remeasured after this change, so its last measured latency remains 15.4 seconds.
+
+A second pass changed hash-guarded remote deletion from SFTP to a single SSH
+command while holding the remote writer lock. A new real Luna smoke test
+measured 0.50 seconds for manifest read, 5.45 seconds for verified fetch, and
+2.02 seconds for deletion; the SHA-256 matched and the isolated remote root was
+removed. Those store stages total 7.97 seconds, but the full Paper callback has
+not been rerun after either optimization.
+
 The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
 scheduler on Fiesta.
@@ -161,7 +176,7 @@ closed, and the tier-failure type remains detectable through wrapped
 exceptions. The complete isolated Paper 1.21.11 checkout applied all seven
 patches and built `createMojmapBundlerJar`; the bundled server JAR contains the
 restore, lease, offload, access-tracker, and scheduler classes. The standalone
-Java fixtures pass, all 52 companion Python unit tests pass, and a separate
+Java fixtures pass, all 53 companion Python unit tests pass, and a separate
 Linux fixture confirmed that Python observes the Java process lock with
 `fcntl.lockf`.
 
