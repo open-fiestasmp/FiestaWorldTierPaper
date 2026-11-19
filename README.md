@@ -119,19 +119,26 @@ access age, local reserve, and Luna quota. With the default 30-day cold age,
 regions accessed during rollout will not be candidates until they have aged
 past that threshold. The scheduler is not installed on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
-Paper server with a fake CLI shim. After the batched transport change, a
-disposable Paper 1.21.11 server restored a synthetic spawn-region bundle from
-Luna after `/forceload add` requested the marked chunk. Its hash matched, the
-marker cleared, and the remote object was consumed. A separate post-change
-probe requested an 8 KiB synthetic region through Paper's asynchronous chunk
-API: the callback completed in 23.2 seconds, the marker cleared, the remote
-object was consumed, the access tracker initialized cleanly, and a tick monitor
-saw no gap above 500 ms. The zero-byte free-space reserve was test-only in the
-disposable configuration. Both tests used isolated worlds and did not touch
-Fiesta data. They do not measure normal-region throughput or player-facing
-latency. Crash recovery, outage recovery, concurrent player movement, and
-production-scale region transfers remain unverified. Automatic eviction stays
-off on Fiesta until those gates pass.
+Paper server with a fake CLI shim. A disposable Paper 1.21.11 server also
+restored a synthetic spawn-region bundle from Luna after `/forceload add`
+requested the marked chunk. Its hash matched, the marker cleared, and the
+remote object was consumed. An earlier separate probe requested an 8 KiB
+synthetic region through Paper's asynchronous chunk API; its callback
+completed in 23.2 seconds.
+
+The latest disposable end-to-end cycle exercised the actual scheduler, leased
+offload API, Luna SFTP store, and asynchronous demand restore. With a synthetic
+8 KiB region selected as the sole cold candidate, Paper offloaded it, then
+restored it when `World.getChunkAtAsync(..., generate=false)` requested the
+chunk. The restored SHA-256 matched the source, the marker cleared, remote test
+usage returned to zero, and a tick monitor saw no gap above 500 ms. The restore
+callback took 15.4 seconds, which is still too slow for a player-facing feature
+and needs optimization. The zero-byte free-space reserve was test-only in the
+disposable configuration. All tests used isolated worlds and did not touch
+Fiesta data. They do not measure normal-region throughput. Crash recovery,
+outage recovery, concurrent player movement, and production-scale region
+transfers remain unverified. Automatic eviction stays off on Fiesta until those
+gates pass.
 
 The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
@@ -154,7 +161,7 @@ closed, and the tier-failure type remains detectable through wrapped
 exceptions. The complete isolated Paper 1.21.11 checkout applied all seven
 patches and built `createMojmapBundlerJar`; the bundled server JAR contains the
 restore, lease, offload, access-tracker, and scheduler classes. The standalone
-Java fixtures pass, all 51 companion Python unit tests pass, and a separate
+Java fixtures pass, all 52 companion Python unit tests pass, and a separate
 Linux fixture confirmed that Python observes the Java process lock with
 `fcntl.lockf`.
 
