@@ -119,9 +119,13 @@ access age, local reserve, and Luna quota. With the default 30-day cold age,
 regions accessed during rollout will not be candidates until they have aged
 past that threshold. The scheduler is not installed on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
-Paper server with a fake CLI shim; real remote transfer, restore, and crash
-recovery still need end-to-end tests. Automatic eviction remains off on Fiesta
-until those gates pass.
+Paper server with a fake CLI shim. An earlier disposable Paper restore through
+Luna succeeded, but the forced load took about 27 seconds and triggered Paper
+watchdog dumps. The batched transport change has since passed a synthetic Luna
+transfer, but the Paper restore path has not yet been rerun with that change.
+Crash recovery, outage recovery, concurrent player movement, and production-
+scale region transfers remain unverified. Automatic eviction stays off on
+Fiesta until those gates pass.
 
 The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
@@ -141,12 +145,26 @@ cancelled waiters do not block progress, the process lease excludes another
 file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
-exceptions. The isolated Paper 1.21.11 checkout compiled successfully with
-`:paper-server:compileJava`; the standalone Java fixtures pass, and all 43
-companion Python unit tests pass. A separate Linux fixture confirmed that the
-Java process lock is observed by Python's `fcntl.lockf` check.
-It has not been installed on Fiesta, tested against Luna, or exercised in a
-disposable Paper server. No production world data was transferred.
+exceptions. The complete isolated Paper 1.21.11 checkout applied all seven
+patches and built `createMojmapBundlerJar`; the bundled server JAR contains the
+restore, lease, offload, access-tracker, and scheduler classes. The standalone
+Java fixtures pass, all 46 companion Python unit tests pass, and a separate
+Linux fixture confirmed that Python observes the Java process lock with
+`fcntl.lockf`.
+
+A synthetic 1,048,607-byte region bundle also passed publish, manifest/hash
+read, verified batched fetch, checksum comparison, and hash-guarded deletion on
+Luna. The unique test root was removed and remote usage returned to zero. With
+SSH multiplexing enabled, the measured phases were 26.6 seconds to publish,
+3.1 seconds to read the manifest, 9.4 seconds to fetch the complete bundle,
+and 9.0 seconds to delete it. Read plus fetch used two SFTP batches. One earlier
+multiplexed store attempt timed out, though a subsequent complete run passed;
+transport stalls still need retry and outage testing.
+
+This has not been installed on Fiesta or tested with a live world. No production
+world data was transferred. The earlier disposable Paper restore through Luna
+predates the batched transport change; repeating that forced-load scenario is
+still required before considering deployment.
 
 ## License
 
