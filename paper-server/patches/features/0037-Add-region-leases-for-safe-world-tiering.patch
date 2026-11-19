@@ -1,0 +1,380 @@
+From e3ddf257fbbe27c51341e6e6ae1203b14ae4194d Mon Sep 17 00:00:00 2001
+From: FiestaSMP Engineering <noreply@github.com>
+Date: Thu, 19 Nov 2026 08:30:09 +0530
+Subject: [PATCH] Add region leases for safe world tiering
+
+---
+ .../io/ChunkSystemRegionFileStorage.java      |   5 +
+ .../chunk_system/io/MoonriseRegionFileIO.java | 146 +++++++++++++++++-
+ .../scheduling/ChunkHolderManager.java        |  33 ++++
+ .../chunk/storage/RegionFileStorage.java      |  48 +++++-
+ 4 files changed, 226 insertions(+), 6 deletions(-)
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/ChunkSystemRegionFileStorage.java b/ca/spottedleaf/moonrise/patches/chunk_system/io/ChunkSystemRegionFileStorage.java
+index a814512..6bb248a 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/io/ChunkSystemRegionFileStorage.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/io/ChunkSystemRegionFileStorage.java
+@@ -3,15 +3,20 @@ package ca.spottedleaf.moonrise.patches.chunk_system.io;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.world.level.chunk.storage.RegionFile;
+ import java.io.IOException;
++import java.nio.file.Path;
+ 
+ public interface ChunkSystemRegionFileStorage {
+ 
++    public Path moonrise$getRegionFolder();
++
+     public boolean moonrise$doesRegionFileNotExistNoIO(final int chunkX, final int chunkZ);
+ 
+     public RegionFile moonrise$getRegionFileIfLoaded(final int chunkX, final int chunkZ);
+ 
+     public RegionFile moonrise$getRegionFileIfExists(final int chunkX, final int chunkZ) throws IOException;
+ 
++    public void moonrise$closeRegionForTiering(final int regionX, final int regionZ) throws IOException;
++
+     public MoonriseRegionFileIO.RegionDataController.WriteData moonrise$startWrite(
+             final int chunkX, final int chunkZ, final CompoundTag compound
+     ) throws IOException;
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java b/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
+index aa3d5a6..d0faf7d 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
+@@ -26,6 +26,7 @@ import java.io.DataInputStream;
+ import java.io.DataOutputStream;
+ import java.io.IOException;
+ import java.lang.invoke.VarHandle;
++import java.nio.file.Path;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.CompletionException;
+ import java.util.concurrent.atomic.AtomicInteger;
+@@ -59,6 +60,91 @@ public final class MoonriseRegionFileIO {
+         }
+     }
+ 
++    /**
++     * Acquires an exclusive lease for an unloaded Anvil region and closes its
++     * cached terrain, entity, and POI files. The returned lease must remain
++     * open until the caller has finished the tier operation.
++     */
++    public static CompletableFuture<RegionTieringLease> acquireTieringLease(final ServerLevel world,
++                                                                            final int regionX, final int regionZ) {
++        final RegionDataController terrain = getControllerFor(world, RegionFileType.CHUNK_DATA);
++        final Path regionFolder = ((ChunkSystemRegionFileStorage)terrain.getCache()).moonrise$getRegionFolder();
++        final Path dimensionRoot = regionFolder.getParent();
++        if (dimensionRoot == null) {
++            return CompletableFuture.failedFuture(new IllegalStateException("Region folder has no dimension root: " + regionFolder));
++        }
++
++        final RegionDataController[] controllers = new RegionDataController[] {
++            terrain,
++            getControllerFor(world, RegionFileType.ENTITY_DATA),
++            getControllerFor(world, RegionFileType.POI_DATA)
++        };
++        for (final RegionDataController controller : controllers) {
++            final Path controllerFolder = ((ChunkSystemRegionFileStorage)controller.getCache()).moonrise$getRegionFolder();
++            if (!dimensionRoot.equals(controllerFolder.getParent())) {
++                return CompletableFuture.failedFuture(new IllegalStateException(
++                    "Terrain, entity, and POI region folders do not share a dimension root"
++                ));
++            }
++        }
++
++        final CompletableFuture<RegionTieringLease> result = new CompletableFuture<>();
++        FiestaRegionLeaseManager.acquireExclusive(dimensionRoot, regionX, regionZ).whenComplete((lease, acquireFailure) -> {
++            if (acquireFailure != null) {
++                result.completeExceptionally(acquireFailure);
++                return;
++            }
++            if (result.isCancelled()) {
++                lease.close();
++                return;
++            }
++            try {
++                world.getServer().execute(() -> {
++                    if (result.isCancelled()) {
++                        lease.close();
++                        return;
++                    }
++                    try {
++                        final ChunkSystemServerLevel moonriseWorld = (ChunkSystemServerLevel)world;
++                        if (!moonriseWorld.moonrise$getChunkTaskScheduler().chunkHolderManager
++                            .isRegionUnloadedForTiering(regionX, regionZ)) {
++                            throw new IllegalStateException("Region still has chunk holders and cannot be tiered");
++                        }
++
++                        for (final RegionDataController controller : controllers) {
++                            ((ChunkSystemRegionFileStorage)controller.getCache())
++                                .moonrise$closeRegionForTiering(regionX, regionZ);
++                        }
++                        final RegionTieringLease tieringLease = new RegionTieringLease(lease);
++                        if (!result.complete(tieringLease)) {
++                            tieringLease.close();
++                        }
++                    } catch (final Throwable thr) {
++                        lease.close();
++                        result.completeExceptionally(thr);
++                    }
++                });
++            } catch (final Throwable thr) {
++                lease.close();
++                result.completeExceptionally(thr);
++            }
++        });
++        return result;
++    }
++
++    public static final class RegionTieringLease implements AutoCloseable {
++        private final FiestaRegionLeaseManager.Lease lease;
++
++        private RegionTieringLease(final FiestaRegionLeaseManager.Lease lease) {
++            this.lease = lease;
++        }
++
++        @Override
++        public void close() {
++            this.lease.close();
++        }
++    }
++
+     private static final RegionFileType[] CACHED_REGIONFILE_TYPES = RegionFileType.values();
+ 
+     /**
+@@ -522,8 +608,7 @@ public final class MoonriseRegionFileIO {
+         write.schedule(task, scheduler);
+ 
+         if (created[0]) {
+-            taskController.startTask(task);
+-            task.scheduleWriteCompress();
++            taskController.startTask(task, task::scheduleWriteCompress);
+         } else {
+             task.raisePriority(priority);
+         }
+@@ -821,8 +906,7 @@ public final class MoonriseRegionFileIO {
+ 
+         // needs to be scheduled
+         if (callbackInfo.tasksNeedReadScheduling) {
+-            taskController.startTask(ret);
+-            ret.scheduleReadIO();
++            taskController.startTask(ret, ret::scheduleReadIO);
+         } else if (callbackInfo.completeNow) {
+             try {
+                 onComplete.accept(callbackInfo.data == null ? null : callbackInfo.data.copy(), callbackInfo.throwable);
+@@ -963,6 +1047,7 @@ public final class MoonriseRegionFileIO {
+         private RegionDataController.ReadData readData;
+         private RegionDataController.WriteData writeData;
+         private boolean failedWrite;
++        private volatile FiestaRegionLeaseManager.Lease regionLease;
+ 
+         public ChunkIOTask(final ServerLevel world, final RegionDataController regionDataController,
+                            final int chunkX, final int chunkZ, final Priority priority, final InProgressRead inProgressRead) {
+@@ -980,6 +1065,34 @@ public final class MoonriseRegionFileIO {
+             }
+         }
+ 
++        private void setRegionLease(final FiestaRegionLeaseManager.Lease lease) {
++            this.regionLease = lease;
++        }
++
++        private void releaseRegionLease() {
++            final FiestaRegionLeaseManager.Lease lease = this.regionLease;
++            this.regionLease = null;
++            if (lease != null) {
++                lease.close();
++            }
++        }
++
++        private void failStart(final Throwable throwable) {
++            this.inProgressRead.complete(this, null, throwable);
++            final long chunkKey = CoordinateUtils.getChunkKey(this.chunkX, this.chunkZ);
++            this.regionDataController.chunkTasks.compute(chunkKey, (final long keyInMap, final ChunkIOTask running) -> {
++                if (running != this) {
++                    return running;
++                }
++                if (this.inProgressWrite != null) {
++                    // Keep the failed snapshot in memory until a later save can replace it.
++                    this.failedWrite = true;
++                    return this;
++                }
++                return null;
++            });
++        }
++
+         // must hold lock on this object
+         private void updatePriority(final Priority priority) {
+             this.priority = priority;
+@@ -1446,11 +1559,34 @@ public final class MoonriseRegionFileIO {
+             return this.regionIoQueue.createTask(chunkX >> 5, chunkZ >> 5, 0, run, priority);
+         }
+ 
+-        final void startTask(final ChunkIOTask task) {
++        final void startTask(final ChunkIOTask task, final Runnable schedule) {
++            final java.nio.file.Path folder = ((ChunkSystemRegionFileStorage)this.getCache()).moonrise$getRegionFolder();
++            final java.nio.file.Path dimensionRoot = folder.getParent();
++            if (dimensionRoot == null) {
++                throw new IllegalStateException("Region folder has no dimension root: " + folder);
++            }
+             this.inProgressTasks.getAndIncrement();
++            FiestaRegionLeaseManager.acquireShared(dimensionRoot, task.chunkX >> 5, task.chunkZ >> 5).whenComplete((lease, throwable) -> {
++                if (throwable != null) {
++                    this.inProgressTasks.getAndDecrement();
++                    LOGGER.error("Failed to acquire shared Fiesta region lease for task " + task, throwable);
++                    task.failStart(throwable);
++                    return;
++                }
++                task.setRegionLease(lease);
++                try {
++                    schedule.run();
++                } catch (final Throwable thr) {
++                    task.releaseRegionLease();
++                    this.inProgressTasks.getAndDecrement();
++                    LOGGER.error("Failed to schedule task after acquiring Fiesta region lease: " + task, thr);
++                    task.failStart(thr);
++                }
++            });
+         }
+ 
+         final void endTask(final ChunkIOTask task) {
++            task.releaseRegionLease();
+             this.inProgressTasks.getAndDecrement();
+         }
+ 
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+index 41b4c5a..1827ce4 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
+@@ -917,6 +917,39 @@ public final class ChunkHolderManager {
+         return this.chunkHolders.get(position);
+     }
+ 
++    /**
++     * Checks whether a full 32 by 32 Anvil region has no chunk holders or
++     * tickets. The region's ticket and scheduling locks make the scan
++     * consistent with concurrent holder creation and ticket updates.
++     */
++    public boolean isRegionUnloadedForTiering(final int regionX, final int regionZ) {
++        TickThread.ensureTickThread("Cannot inspect region tiering eligibility off-main");
++
++        final int minChunkX = regionX << 5;
++        final int minChunkZ = regionZ << 5;
++        final int maxChunkX = minChunkX + 31;
++        final int maxChunkZ = minChunkZ + 31;
++        final ReentrantAreaLock.Node ticketLock = this.ticketLockArea.lock(minChunkX, minChunkZ, maxChunkX, maxChunkZ);
++        try {
++            final ReentrantAreaLock.Node scheduleLock = this.taskScheduler.schedulingLockArea.lock(minChunkX, minChunkZ, maxChunkX, maxChunkZ);
++            try {
++                for (int chunkX = minChunkX; chunkX <= maxChunkX; ++chunkX) {
++                    for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; ++chunkZ) {
++                        final long chunkKey = CoordinateUtils.getChunkKey(chunkX, chunkZ);
++                        if (this.chunkHolders.get(chunkKey) != null || this.tickets.get(chunkKey) != null) {
++                            return false;
++                        }
++                    }
++                }
++                return true;
++            } finally {
++                this.taskScheduler.schedulingLockArea.unlock(scheduleLock);
++            }
++        } finally {
++            this.ticketLockArea.unlock(ticketLock);
++        }
++    }
++
+     public void raisePriority(final int x, final int z, final Priority priority) {
+         final NewChunkHolder chunkHolder = this.getChunkHolder(x, z);
+         if (chunkHolder != null) {
+diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+index 0ee11d9..0a0bb1f 100644
+--- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
++++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+@@ -94,11 +94,24 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+             && !this.doesRegionFilePossiblyExist(ChunkPos.asLong(chunkX >> REGION_SHIFT, chunkZ >> REGION_SHIFT)); // Fiesta - remote region restore
+     }
+ 
++    @Override
++    public final Path moonrise$getRegionFolder() {
++        return this.folder;
++    }
++
+     @Override
+     public synchronized final RegionFile moonrise$getRegionFileIfLoaded(final int chunkX, final int chunkZ) {
+         return this.regionCache.getAndMoveToFirst(ChunkPos.asLong(chunkX >> REGION_SHIFT, chunkZ >> REGION_SHIFT));
+     }
+ 
++    @Override
++    public synchronized final void moonrise$closeRegionForTiering(final int regionX, final int regionZ) throws IOException {
++        final RegionFile cached = this.regionCache.remove(ChunkPos.asLong(regionX, regionZ));
++        if (cached != null) {
++            cached.close();
++        }
++    }
++
+     @Override
+     public synchronized final RegionFile moonrise$getRegionFileIfExists(final int chunkX, final int chunkZ) throws IOException {
+         final long key = ChunkPos.asLong(chunkX >> REGION_SHIFT, chunkZ >> REGION_SHIFT);
+@@ -386,7 +399,28 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     }
+     // Paper end
+ 
++    private ca.spottedleaf.moonrise.patches.chunk_system.io.FiestaRegionLeaseManager.Lease acquireTierIoLease(
++            final ChunkPos chunkPos
++    ) throws IOException {
++        final Path dimensionRoot = this.folder.getParent();
++        if (dimensionRoot == null) {
++            throw new IOException("Region folder has no dimension root: " + this.folder);
++        }
++        try {
++            return ca.spottedleaf.moonrise.patches.chunk_system.io.FiestaRegionLeaseManager
++                .acquireShared(dimensionRoot, chunkPos.x >> REGION_SHIFT, chunkPos.z >> REGION_SHIFT).join();
++        } catch (final java.util.concurrent.CompletionException ex) {
++            throw new IOException("Could not acquire Fiesta region I/O lease for " + chunkPos, ex.getCause());
++        }
++    }
++
+     public @Nullable CompoundTag read(ChunkPos chunkPos) throws IOException {
++        try (final ca.spottedleaf.moonrise.patches.chunk_system.io.FiestaRegionLeaseManager.Lease ignored = this.acquireTierIoLease(chunkPos)) {
++            return this.readWithTierIoLease(chunkPos);
++        }
++    }
++
++    private @Nullable CompoundTag readWithTierIoLease(final ChunkPos chunkPos) throws IOException {
+         // CraftBukkit start - SPIGOT-5680: There's no good reason to preemptively create files on read, save that for writing
+         RegionFile regionFile = this.getRegionFile(chunkPos, true);
+         if (regionFile == null) {
+@@ -413,7 +447,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+                 if (!headerChunkPos.equals(chunkPos)) {
+                     net.minecraft.server.MinecraftServer.LOGGER.error("Attempting to read chunk data at " + chunkPos + " but got chunk data for " + headerChunkPos + " instead! Attempting regionfile recalculation for regionfile " + regionFile.getPath().toAbsolutePath());
+                     if (regionFile.recalculateHeader()) {
+-                        return this.read(chunkPos);
++                        return this.readWithTierIoLease(chunkPos);
+                     }
+                     net.minecraft.server.MinecraftServer.LOGGER.error("Can't recalculate regionfile header, regenerating chunk " + chunkPos + " for " + regionFile.getPath().toAbsolutePath());
+                     return null;
+@@ -426,6 +460,12 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     }
+ 
+     public void scanChunk(ChunkPos chunkPos, StreamTagVisitor visitor) throws IOException {
++        try (final ca.spottedleaf.moonrise.patches.chunk_system.io.FiestaRegionLeaseManager.Lease ignored = this.acquireTierIoLease(chunkPos)) {
++            this.scanChunkWithTierIoLease(chunkPos, visitor);
++        }
++    }
++
++    private void scanChunkWithTierIoLease(final ChunkPos chunkPos, final StreamTagVisitor visitor) throws IOException {
+         // CraftBukkit start - SPIGOT-5680: There's no good reason to preemptively create files on read, save that for writing
+         RegionFile regionFile = this.getRegionFile(chunkPos, true);
+         if (regionFile == null) {
+@@ -441,6 +481,12 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+     }
+ 
+     public void write(ChunkPos chunkPos, @Nullable CompoundTag chunkData) throws IOException { // Paper - rewrite chunk system - public
++        try (final ca.spottedleaf.moonrise.patches.chunk_system.io.FiestaRegionLeaseManager.Lease ignored = this.acquireTierIoLease(chunkPos)) {
++            this.writeWithTierIoLease(chunkPos, chunkData);
++        }
++    }
++
++    private void writeWithTierIoLease(final ChunkPos chunkPos, @Nullable final CompoundTag chunkData) throws IOException {
+         if (!SharedConstants.DEBUG_DONT_SAVE_WORLD) {
+             RegionFile regionFile = this.getRegionFile(chunkPos, chunkData == null); // CraftBukkit // Paper - rewrite chunk system
+             // Paper start - rewrite chunk system
+-- 
+2.53.0
+

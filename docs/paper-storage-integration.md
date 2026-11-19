@@ -16,6 +16,16 @@ system error instead of loading an empty chunk. This intentionally favors
 preserving region data over keeping the server online during a remote-store
 failure.
 
+Patch `0037` adds a fair per-region lease around Moonrise asynchronous chunk
+reads and writes and Paper's synchronous region read, scan, and write paths.
+`MoonriseRegionFileIO.acquireTieringLease(world, regionX, regionZ)` waits for
+those operations, checks on the server thread that the region has no chunk
+holders or tickets, and closes the cached terrain, entity, and POI region
+files. A caller must hold the returned lease through the complete offload and
+durable journal transition, and run network and filesystem transfer work off
+the server thread. There is not yet an automatic eviction caller; the lease
+seam alone does not make production offload ready.
+
 Install the Python package on the Paper host so the command is available at
 `/usr/local/bin/fiesta-world-tier`. Place its configuration at
 `/etc/fiesta-world-tier/config.json` with mode `0600`; keep the SSH private key
@@ -43,13 +53,14 @@ full-bundle verification.
 ## Scope and current safety boundary
 
 This hook covers demand restore and prevents missing remote data from being
-treated as new terrain. It does **not** implement automatic eviction. A file
-lock serializes tier commands but cannot prove that Paper has unloaded every
-chunk in a region or drained all chunk reads, writes, tickets, and save tasks.
-Do not call the prototype's `TierManager.offload` against a live Paper world
-until a Paper-side per-region lease enforces those conditions. The patch has
-only been built against the isolated Paper 1.21.11 checkout; it has not been
-installed on Fiesta or exercised against a disposable Paper world yet.
+treated as new terrain. The new lease coordinates Paper's region-file I/O
+paths and rejects a region with any holder or ticket. Automatic eviction still
+requires a caller that holds this lease across the durable remote transfer,
+local removal, and journal commit, plus disposable-server crash and concurrency
+tests. Do not call the prototype's `TierManager.offload` against a live Fiesta
+world. The patch has only been built against the isolated Paper 1.21.11
+checkout; it has not been installed on Fiesta or exercised against a disposable
+Paper world yet.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk

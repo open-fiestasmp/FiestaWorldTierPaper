@@ -4,7 +4,7 @@ Experimental Paper 1.21.11 patch for restoring cold region bundles before
 Paper treats missing local data as empty terrain. This project is GPL-3.0
 because it changes Paper's GPL-licensed storage code.
 
-The implementation consists of three ordered Paper patches and two small Java
+The implementation consists of four ordered Paper patches and three small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
@@ -16,16 +16,22 @@ helpers:
 - `paper-server/patches/features/0036-...patch` preserves marked restore
   failures through Moonrise's chunk-loading tasks. The scheduler receives the
   error instead of converting it into a blank chunk.
+- `paper-server/patches/features/0037-...patch` coordinates per-region
+  shared/exclusive leases with Moonrise chunk I/O, rejects regions with chunk
+  holders or tickets, and closes cached terrain/entity/POI files before a
+  tiering operation proceeds.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
   identifies restore failures through Paper and Moonrise exception wrappers.
+- `paper-server/src/main/java/.../FiestaRegionLeaseManager.java` provides the
+  fair asynchronous lease queue used by the patch.
 
 ## Build against Paper 1.21.11
 
-Use a clean Paper 1.21.11 source checkout. Copy the feature patch into
-`paper-server/patches/features/` after the existing feature patches, copy both
-Java helpers to the matching `paper-server/src/main/java/` package path, then
+Use a clean Paper 1.21.11 source checkout. Copy the feature patches into
+`paper-server/patches/features/` after the existing feature patches, copy all
+three Java helpers to their matching `paper-server/src/main/java/` package paths, then
 run:
 
 ```sh
@@ -33,7 +39,7 @@ run:
 ./gradlew createMojmapBundlerJar
 ```
 
-All three patches are ordered and version-specific. Rebase and rebuild them
+All four patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
@@ -67,25 +73,29 @@ I/O errors and never become empty-region reads.
 
 ## Scope and verification
 
-This integration provides demand restore only. It does not implement automatic
-eviction or prove that a region is unloaded and has no pending Paper reads,
-writes, tickets, or saves. The prototype's offload manager must not be used on a
-live Paper world until a Paper-side per-region unload/drain lease exists.
+This integration provides demand restore and a Paper-side lease seam, but it
+does not implement automatic eviction. The tiering caller must acquire and
+hold `MoonriseRegionFileIO.acquireTieringLease(...)` across upload, local file
+removal, and journal publication, then close it. The future completes after
+Paper checks the region on its main thread; remote work must run off that
+thread. No production tierer currently calls this API, so automatic eviction
+must remain disabled.
 
 The patches build as part of the isolated Paper 1.21.11 checkout. A restore
 failure becomes a fatal chunk-system error and stops the server rather than
 allowing the failed region to load as empty terrain. Run the
-standalone Java marker fixture with:
+standalone Java lease and marker fixtures with:
 
 ```sh
 ./tests/run-marker-fixture.sh
 ```
 
-It checks that `REMOTE_ONLY`, `EVICTING`, and `RESTORING` markers force recovery
-when terrain exists, invalid markers fail closed, and the tier-failure type
-remains detectable through wrapped exceptions. A separate fixture also exercised
-restore invocation and retry after a partial restore. The companion Python
-package's 24 unit tests pass.
+The fixtures check that shared leases wait fairly around exclusive requests,
+cancelled waiters do not block progress, `REMOTE_ONLY`, `EVICTING`, and
+`RESTORING` markers force recovery when terrain exists, invalid markers fail
+closed, and the tier-failure type remains detectable through wrapped
+exceptions. The isolated Paper 1.21.11 checkout compiled successfully with
+`:paper-server:compileJava`. The companion Python package's 28 unit tests pass.
 It has not been installed on Fiesta, tested against Luna, or exercised in a
 disposable Paper server. No production world data was transferred.
 
