@@ -7,7 +7,11 @@ because it changes Paper's GPL-licensed storage code.
 The implementation has two pieces:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
-  before Moonrise's negative cache and before Paper opens or creates a region.
+  before Moonrise's negative cache.
+- `paper-server/patches/features/0035-...patch` restores the whole bundle before
+  returning a cached file handle or creating a region. It closes a stale cached
+  handle first, so a partial eviction cannot leave terrain cached while entity,
+  POI, or oversized-chunk files are missing.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 
@@ -23,8 +27,8 @@ run:
 ./gradlew createMojmapBundlerJar
 ```
 
-The patch context is version-specific. Rebase and rebuild it when Paper changes;
-do not apply it blindly to another Paper release.
+Both patches are ordered and version-specific. Rebase and rebuild them when
+Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
 
@@ -46,11 +50,12 @@ the companion repository's example configuration.
 
 Markers live at
 `<dimension-root>/.world-tier/remote/r.<region-x>.<region-z>.json`. The marker
-records `REMOTE_ONLY` after a verified upload. Before download, the command
-durably changes it to `RESTORING`; Paper retries that state even if partial
-local files exist. A complete, checksum-verified bundle is published before
-the marker and remote object are removed. Restore failures propagate as I/O
-errors and never become empty-region reads.
+records `REMOTE_ONLY` after a verified upload. Any remaining marker triggers
+full-bundle recovery, even if a terrain file survived an interrupted eviction.
+Before download, the command durably changes it to `RESTORING`; Paper retries
+that state even if partial local files exist. A complete, checksum-verified
+bundle is published before the marker and remote object are removed. Restore
+failures propagate as I/O errors and never become empty-region reads.
 
 ## Scope and verification
 
@@ -59,9 +64,17 @@ eviction or prove that a region is unloaded and has no pending Paper reads,
 writes, tickets, or saves. The prototype's offload manager must not be used on a
 live Paper world until a Paper-side per-region unload/drain lease exists.
 
-The patch builds as part of the isolated Paper 1.21.11 checkout. The companion
-Python package's 24 unit tests pass, and a Java fixture exercised marker lookup,
-restore invocation, retry after a partial restore, and failure propagation.
+The patches build as part of the isolated Paper 1.21.11 checkout. Run the
+standalone Java marker fixture with:
+
+```sh
+./tests/run-marker-fixture.sh
+```
+
+It checks that both `REMOTE_ONLY` and `RESTORING` markers force recovery when
+terrain exists, and that invalid markers fail closed. A separate fixture also
+exercised restore invocation, retry after a partial restore, and failure
+propagation. The companion Python package's 24 unit tests pass.
 It has not been installed on Fiesta, tested against Luna, or exercised in a
 disposable Paper server. No production world data was transferred.
 

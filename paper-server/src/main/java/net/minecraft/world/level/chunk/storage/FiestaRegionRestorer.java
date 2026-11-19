@@ -35,10 +35,11 @@ final class FiestaRegionRestorer {
     private FiestaRegionRestorer() {}
 
     /**
-     * Returns whether restore is needed: remote-only data with no local terrain,
-     * or any bundle whose durable marker says restoration is in progress.
-     * Invalid marker files still return true so the real I/O path fails closed
-     * instead of using Moonrise's negative cache.
+     * Any durable marker requires recovery. A surviving terrain file does not
+     * prove that eviction completed: a crash may have deleted only the entity,
+     * POI, or oversized-chunk members of the bundle. Invalid markers also
+     * return true so the real I/O path fails closed instead of using Moonrise's
+     * negative cache.
      */
     static boolean needsRestore(final Path storageFolder, final int chunkX, final int chunkZ) {
         try {
@@ -46,13 +47,8 @@ final class FiestaRegionRestorer {
             if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
                 return false;
             }
-            if ("RESTORING".equals(markerState(marker))) {
-                return true;
-            }
-            final Path dimensionRoot = storageFolder.toAbsolutePath().normalize().getParent();
-            final Path terrainRegion = dimensionRoot.resolve("region")
-                .resolve("r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca");
-            return !Files.isRegularFile(terrainRegion, LinkOption.NOFOLLOW_LINKS);
+            markerState(marker); // validate the durable state before entering recovery
+            return true;
         } catch (final IOException | RuntimeException ignored) {
             // Force the normal I/O path, where the invalid storage path becomes
             // a visible IOException rather than a cached "no region" result.
@@ -93,15 +89,11 @@ final class FiestaRegionRestorer {
                 }
                 throw new IOException("Fiesta world-tier marker disappeared before local data was restored: " + marker);
             }
-            final String state = markerState(marker);
+            markerState(marker);
             if (Files.exists(terrainRegion, LinkOption.NOFOLLOW_LINKS)
                 && !Files.isRegularFile(terrainRegion, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException("Local terrain region is not a regular file: " + terrainRegion);
             }
-            if ("REMOTE_ONLY".equals(state) && Files.isRegularFile(terrainRegion, LinkOption.NOFOLLOW_LINKS)) {
-                return true;
-            }
-
             final Path command = configuredPath(COMMAND_PROPERTY, DEFAULT_COMMAND, true);
             final Path config = configuredPath(CONFIG_PROPERTY, DEFAULT_CONFIG, false);
             final long timeoutSeconds = timeoutSeconds();

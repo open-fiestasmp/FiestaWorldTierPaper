@@ -1,10 +1,13 @@
 # Paper restore integration
 
-The companion Paper 1.21.11 patch adds a narrow restore seam to
-`RegionFileStorage`. When a terrain region is absent locally and has a marker
-at `<dimension-root>/.world-tier/remote/r.<x>.<z>.json`, Paper calls the
-`fiesta-world-tier restore` command before returning no data or creating a new
-region. It also checks this marker before trusting Moonrise's negative cache.
+The companion Paper 1.21.11 patches add a narrow restore seam to
+`RegionFileStorage`. When a region bundle has a marker at
+`<dimension-root>/.world-tier/remote/r.<x>.<z>.json`, Paper calls the
+`fiesta-world-tier restore` command before returning a cached region handle,
+returning no data, or creating a new region. It also checks the marker before
+trusting Moonrise's negative cache. Any marker triggers recovery, because a
+surviving terrain `.mca` does not prove that the entity, POI, or oversized chunk
+files survived an interrupted eviction.
 The child receives an argument vector (no shell), a minimal environment, a
 bounded timeout, and a private configuration path. A failed restore propagates
 as an I/O error; it cannot silently become an empty world region.
@@ -27,8 +30,10 @@ checks a local free-space reserve, atomically publishes all listed files, then
 removes the marker and remote object. A marker is written only after a remote
 bundle has been fully uploaded and verified. Before publishing restored files,
 the command durably changes the marker from `REMOTE_ONLY` to `RESTORING`. Paper
-will retry a `RESTORING` marker even if some local files exist, so a failed or
-interrupted multi-file publication cannot be mistaken for a complete restore.
+retries either state even if some local files exist, so an interrupted eviction
+or multi-file restore cannot be mistaken for a complete bundle. Paper closes
+any cached region handle before invoking recovery, then opens a fresh handle
+only after full-bundle verification.
 
 ## Scope and current safety boundary
 

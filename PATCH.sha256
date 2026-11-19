@@ -1,1 +1,2 @@
 3c4f23ff0d00e4b898c57c569fb732d9c200566cf053db102eacc5c98ade14bb  paper-server/patches/features/0034-Restore-marked-remote-regions-before-treating-them-a.patch
+22726d9506628c817b3c3ae9d0624a9a8caee39942e3d6cacb9b8f762bd9f829  paper-server/patches/features/0035-Recover-interrupted-region-bundles-before-cache-use.patch
