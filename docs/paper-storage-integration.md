@@ -1,4 +1,4 @@
-# Paper restore integration
+# Paper restore and offload integration
 
 The companion Paper 1.21.11 patches add a narrow restore seam to
 `RegionFileStorage`. When a region bundle has a marker at
@@ -15,6 +15,14 @@ terrain, entity, and POI load tasks; the chunk scheduler raises a fatal chunk
 system error instead of loading an empty chunk. This intentionally favors
 preserving region data over keeping the server online during a remote-store
 failure.
+
+Patch `0038` exposes the experimental
+`MoonriseRegionFileIO.offloadRegion(world, regionX, regionZ)` API. Paper checks
+the region on its main thread, closes cached terrain/entity/POI files, then
+holds the exclusive region lease while a worker runs the companion `offload`
+command. The command refuses to proceed unless it can verify Paper's live
+cross-process file lock. This Java/Python lock handoff has been checked on
+Linux.
 
 Patch `0037` adds a fair per-region lease around Moonrise asynchronous chunk
 reads and writes and Paper's synchronous region read, scan, and write paths.
@@ -36,6 +44,7 @@ command/config paths and timeout can be overridden with these JVM properties:
 -Dfiesta.worldTier.command=/usr/local/bin/fiesta-world-tier
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
+-Dfiesta.worldTier.offloadTimeoutSeconds=3600
 ```
 
 The command validates the marker's dimension, coordinates, state, and manifest hash,
@@ -53,14 +62,13 @@ full-bundle verification.
 ## Scope and current safety boundary
 
 This hook covers demand restore and prevents missing remote data from being
-treated as new terrain. The new lease coordinates Paper's region-file I/O
-paths and rejects a region with any holder or ticket. Automatic eviction still
-requires a caller that holds this lease across the durable remote transfer,
-local removal, and journal commit, plus disposable-server crash and concurrency
-tests. Do not call the prototype's `TierManager.offload` against a live Fiesta
-world. The patch has only been built against the isolated Paper 1.21.11
-checkout; it has not been installed on Fiesta or exercised against a disposable
-Paper world yet.
+treated as new terrain. The Paper patch includes an explicit leased offload
+API and the Python `offload` command, which requires Paper's held OS file lock.
+There is no automatic cold-region selector or scheduler, and no production
+caller invokes the API. Do not enable offloading on a live world until the
+access-age policy, restart/crash recovery, and concurrency behavior pass
+disposable-server tests. The patch has not been installed on Fiesta or
+exercised against a disposable Paper world.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk

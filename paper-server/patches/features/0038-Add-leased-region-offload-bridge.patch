@@ -1,0 +1,137 @@
+From 9c493833b0d8970f08d3247947737b1fe66ef122 Mon Sep 17 00:00:00 2001
+From: FiestaSMP Engineering <noreply@github.com>
+Date: Thu, 19 Nov 2026 08:55:31 +0530
+Subject: [PATCH] Add leased region offload bridge
+
+---
+ .../chunk_system/io/MoonriseRegionFileIO.java | 74 ++++++++++++++++++-
+ 1 file changed, 71 insertions(+), 3 deletions(-)
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java b/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
+index d0faf7d..03a4985 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
+@@ -29,6 +29,9 @@ import java.lang.invoke.VarHandle;
+ import java.nio.file.Path;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.CompletionException;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.concurrent.atomic.AtomicLong;
+ import java.util.function.BiConsumer;
+@@ -37,6 +40,12 @@ import java.util.function.Consumer;
+ public final class MoonriseRegionFileIO {
+ 
+     private static final Logger LOGGER = LoggerFactory.getLogger(MoonriseRegionFileIO.class);
++    private static final ExecutorService TIERING_EXECUTOR = Executors.newSingleThreadExecutor(task -> {
++        final Thread thread = new Thread(task, "Fiesta World Tier");
++        thread.setDaemon(true);
++        return thread;
++    });
++    private static final java.util.Set<String> PENDING_TIERING = ConcurrentHashMap.newKeySet();
+ 
+     /**
+      * The types of RegionFiles controlled by the I/O thread(s).
+@@ -104,6 +113,7 @@ public final class MoonriseRegionFileIO {
+                         lease.close();
+                         return;
+                     }
++                    FiestaRegionLeaseManager.ProcessLease processLease = null;
+                     try {
+                         final ChunkSystemServerLevel moonriseWorld = (ChunkSystemServerLevel)world;
+                         if (!moonriseWorld.moonrise$getChunkTaskScheduler().chunkHolderManager
+@@ -115,11 +125,20 @@ public final class MoonriseRegionFileIO {
+                             ((ChunkSystemRegionFileStorage)controller.getCache())
+                                 .moonrise$closeRegionForTiering(regionX, regionZ);
+                         }
+-                        final RegionTieringLease tieringLease = new RegionTieringLease(lease);
++                        processLease = FiestaRegionLeaseManager.acquireProcessLease(dimensionRoot, regionX, regionZ);
++                        final RegionTieringLease tieringLease = new RegionTieringLease(lease, processLease);
++                        processLease = null; // ownership transferred to the returned lease
+                         if (!result.complete(tieringLease)) {
+                             tieringLease.close();
+                         }
+                     } catch (final Throwable thr) {
++                        if (processLease != null) {
++                            try {
++                                processLease.close();
++                            } catch (final IOException closeFailure) {
++                                thr.addSuppressed(closeFailure);
++                            }
++                        }
+                         lease.close();
+                         result.completeExceptionally(thr);
+                     }
+@@ -132,16 +151,65 @@ public final class MoonriseRegionFileIO {
+         return result;
+     }
+ 
++    /**
++     * Offloads one region on a dedicated worker while holding Paper's exclusive
++     * region lease for the child process's full upload and local eviction.
++     */
++    public static CompletableFuture<Void> offloadRegion(final ServerLevel world, final int regionX, final int regionZ) {
++        final Path regionFolder = ((ChunkSystemRegionFileStorage)getControllerFor(world, RegionFileType.CHUNK_DATA)
++            .getCache()).moonrise$getRegionFolder();
++        final Path dimensionRoot = regionFolder.getParent();
++        if (dimensionRoot == null) {
++            return CompletableFuture.failedFuture(new IllegalStateException("Region folder has no dimension root: " + regionFolder));
++        }
++        final String operationKey = dimensionRoot.toAbsolutePath().normalize() + ":" + regionX + ":" + regionZ;
++        if (!PENDING_TIERING.add(operationKey)) {
++            return CompletableFuture.failedFuture(new IllegalStateException("Region tier operation is already pending"));
++        }
++
++        final CompletableFuture<Void> result = new CompletableFuture<>();
++        try {
++            TIERING_EXECUTOR.execute(() -> {
++                try {
++                    try (final RegionTieringLease lease = acquireTieringLease(world, regionX, regionZ).join()) {
++                        net.minecraft.world.level.chunk.storage.FiestaRegionOffloader.offload(
++                            dimensionRoot, world.dimension().identifier().toString(), regionX, regionZ
++                        );
++                    }
++                    result.complete(null);
++                } catch (final Throwable thr) {
++                    final Throwable cause = thr instanceof CompletionException && thr.getCause() != null ? thr.getCause() : thr;
++                    result.completeExceptionally(cause);
++                } finally {
++                    PENDING_TIERING.remove(operationKey);
++                }
++            });
++        } catch (final Throwable thr) {
++            PENDING_TIERING.remove(operationKey);
++            result.completeExceptionally(thr);
++        }
++        return result;
++    }
++
+     public static final class RegionTieringLease implements AutoCloseable {
+         private final FiestaRegionLeaseManager.Lease lease;
++        private final FiestaRegionLeaseManager.ProcessLease processLease;
+ 
+-        private RegionTieringLease(final FiestaRegionLeaseManager.Lease lease) {
++        private RegionTieringLease(final FiestaRegionLeaseManager.Lease lease,
++                                   final FiestaRegionLeaseManager.ProcessLease processLease) {
+             this.lease = lease;
++            this.processLease = processLease;
+         }
+ 
+         @Override
+         public void close() {
+-            this.lease.close();
++            try {
++                this.processLease.close();
++            } catch (final IOException ex) {
++                LOGGER.error("Could not release Fiesta region process lease", ex);
++            } finally {
++                this.lease.close();
++            }
+         }
+     }
+ 
+-- 
+2.53.0
+

@@ -1,11 +1,21 @@
 package ca.spottedleaf.moonrise.patches.chunk_system.io;
 
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -26,6 +36,79 @@ public final class FiestaRegionLeaseManager {
 
     public static CompletableFuture<Lease> acquireExclusive(final Path dimensionRoot, final int regionX, final int regionZ) {
         return acquire(dimensionRoot, regionX, regionZ, true);
+    }
+
+    /**
+     * Acquires a cross-process proof lock for the Python offload child. Linux
+     * FileChannel locks share the POSIX record-lock namespace with Python's
+     * fcntl.lockf probe.
+     */
+    public static ProcessLease acquireProcessLease(final Path dimensionRoot, final int regionX, final int regionZ) throws IOException {
+        final Path root = dimensionRoot.toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Unsafe Fiesta dimension root for process lease: " + root);
+        }
+
+        final Path worldTier = root.resolve(".world-tier");
+        final Path leaseDirectory = worldTier.resolve("paper-leases");
+        createPrivateDirectory(worldTier);
+        createPrivateDirectory(leaseDirectory);
+
+        final Path lockPath = leaseDirectory.resolve("r." + regionX + "." + regionZ + ".lock");
+        if (Files.isSymbolicLink(lockPath)) {
+            throw new IOException("Fiesta Paper process lease path is a symlink: " + lockPath);
+        }
+        final FileChannel channel = FileChannel.open(
+            lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS
+        );
+        try {
+            Files.setPosixFilePermissions(lockPath, Set.of(
+                PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE
+            ));
+            final FileLock lock;
+            try {
+                lock = channel.tryLock();
+            } catch (final OverlappingFileLockException ex) {
+                throw new IOException("Fiesta Paper process lease is already held in this JVM", ex);
+            }
+            if (lock == null) {
+                throw new IOException("Fiesta Paper process lease is already held by another process");
+            }
+            return new ProcessLease(channel, lock);
+        } catch (final Throwable thr) {
+            try {
+                channel.close();
+            } catch (final IOException closeFailure) {
+                thr.addSuppressed(closeFailure);
+            }
+            if (thr instanceof IOException ioException) {
+                throw ioException;
+            }
+            if (thr instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (thr instanceof Error error) {
+                throw error;
+            }
+            throw new IOException("Could not acquire Fiesta Paper process lease", thr);
+        }
+    }
+
+    private static void createPrivateDirectory(final Path directory) throws IOException {
+        if (Files.isSymbolicLink(directory)) {
+            throw new IOException("Fiesta Paper lease directory is a symlink: " + directory);
+        }
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            Files.createDirectory(directory, PosixFilePermissions.asFileAttribute(Set.of(
+                PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE
+            )));
+        }
+        if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Fiesta Paper lease path is not a directory: " + directory);
+        }
+        Files.setPosixFilePermissions(directory, Set.of(
+            PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE
+        ));
     }
 
     private static CompletableFuture<Lease> acquire(final Path dimensionRoot, final int regionX, final int regionZ,
@@ -135,6 +218,28 @@ public final class FiestaRegionLeaseManager {
     }
 
     private record RegionKey(Path dimensionRoot, int regionX, int regionZ) {}
+
+    public static final class ProcessLease implements AutoCloseable {
+        private final FileChannel channel;
+        private final FileLock lock;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private ProcessLease(final FileChannel channel, final FileLock lock) {
+            this.channel = channel;
+            this.lock = lock;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (this.closed.compareAndSet(false, true)) {
+                try {
+                    this.lock.release();
+                } finally {
+                    this.channel.close();
+                }
+            }
+        }
+    }
 
     public static final class Lease implements AutoCloseable {
         private final RegionKey key;

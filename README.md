@@ -1,10 +1,11 @@
 # Fiesta World Tier Paper integration
 
 Experimental Paper 1.21.11 patch for restoring cold region bundles before
-Paper treats missing local data as empty terrain. This project is GPL-3.0
+Paper treats missing local data as empty terrain and for coordinating an
+explicit, leased offload call. This project is GPL-3.0
 because it changes Paper's GPL-licensed storage code.
 
-The implementation consists of four ordered Paper patches and three small Java
+The implementation consists of five ordered Paper patches and four small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
@@ -20,18 +21,24 @@ helpers:
   shared/exclusive leases with Moonrise chunk I/O, rejects regions with chunk
   holders or tickets, and closes cached terrain/entity/POI files before a
   tiering operation proceeds.
+- `paper-server/patches/features/0038-...patch` exposes an experimental
+  offload call on a dedicated worker. It holds Paper's exclusive in-process
+  lease and a Linux process lock while the companion command uploads and evicts
+  the bundle.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
   identifies restore failures through Paper and Moonrise exception wrappers.
 - `paper-server/src/main/java/.../FiestaRegionLeaseManager.java` provides the
-  fair asynchronous lease queue used by the patch.
+  fair asynchronous lease queue and the cross-process lease used by the child.
+- `paper-server/src/main/java/.../FiestaRegionOffloader.java` invokes and
+  validates the companion offload command.
 
 ## Build against Paper 1.21.11
 
 Use a clean Paper 1.21.11 source checkout. Copy the feature patches into
 `paper-server/patches/features/` after the existing feature patches, copy all
-three Java helpers to their matching `paper-server/src/main/java/` package paths, then
+four Java helpers to their matching `paper-server/src/main/java/` package paths, then
 run:
 
 ```sh
@@ -39,7 +46,7 @@ run:
 ./gradlew createMojmapBundlerJar
 ```
 
-All four patches are ordered and version-specific. Rebase and rebuild them
+All five patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
@@ -53,6 +60,7 @@ needed):
 -Dfiesta.worldTier.command=/usr/local/bin/fiesta-world-tier
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
+-Dfiesta.worldTier.offloadTimeoutSeconds=3600
 ```
 
 The config must be a regular file with mode `0600`; the SSH identity and pinned
@@ -73,13 +81,18 @@ I/O errors and never become empty-region reads.
 
 ## Scope and verification
 
-This integration provides demand restore and a Paper-side lease seam, but it
-does not implement automatic eviction. The tiering caller must acquire and
-hold `MoonriseRegionFileIO.acquireTieringLease(...)` across upload, local file
-removal, and journal publication, then close it. The future completes after
-Paper checks the region on its main thread; remote work must run off that
-thread. No production tierer currently calls this API, so automatic eviction
-must remain disabled.
+This integration provides demand restore and an experimental
+`MoonriseRegionFileIO.offloadRegion(...)` API. It checks the region on Paper's
+main thread, closes cached files, then holds both the in-process lease and a
+cross-process file lock while the companion command completes upload and local
+eviction on a worker. The Python command verifies that Paper still holds the
+OS lock before it will offload. Java/Python lock interoperability was checked
+on Linux.
+
+There is no automatic cold-region selector or scheduler, and no production
+caller currently invokes this API. Automatic eviction remains disabled; do not
+invoke it on Fiesta until access-age selection, restart/crash recovery, and
+concurrency behavior pass disposable-server tests.
 
 The patches build as part of the isolated Paper 1.21.11 checkout. A restore
 failure becomes a fatal chunk-system error and stops the server rather than
@@ -91,11 +104,14 @@ standalone Java lease and marker fixtures with:
 ```
 
 The fixtures check that shared leases wait fairly around exclusive requests,
-cancelled waiters do not block progress, `REMOTE_ONLY`, `EVICTING`, and
+cancelled waiters do not block progress, the process lease excludes another
+file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
 exceptions. The isolated Paper 1.21.11 checkout compiled successfully with
-`:paper-server:compileJava`. The companion Python package's 28 unit tests pass.
+`:paper-server:compileJava`; the standalone Java fixtures pass, and all 30
+companion Python unit tests pass. A separate Linux fixture confirmed that the
+Java process lock is observed by Python's `fcntl.lockf` check.
 It has not been installed on Fiesta, tested against Luna, or exercised in a
 disposable Paper server. No production world data was transferred.
 
