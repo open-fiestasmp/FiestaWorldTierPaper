@@ -204,3 +204,18 @@ reserve check fails, the operation returns a typed I/O error and leaves the
 world files untouched. Paper/Moonrise fails the chunk task and stops the server
 with a crash report; restore the remote service and retry server startup. Keep
 a separate complete backup before any production rollout.
+
+### Paper chunk-load restore with streamed Luna download
+
+On 2026-11-19, a disposable Paper 1.21.11 server exercised the current
+streamed SSH restore path through Paper's normal saved-chunk load. The test
+seeded a gold block in chunk `(0, 0)`, published its 606 KiB region bundle to a
+unique Luna test root, removed the local region file, and wrote a
+`REMOTE_ONLY` marker. A second server process loaded the chunk through the
+patched Paper hook; the test plugin observed the gold block and logged
+`FIESTA_TIER_E2E_RESTORED`. The local region file was restored, the durable
+marker was cleared, and Luna's test-root usage returned to zero before the
+test root was removed. This confirms the new streamed fetch works at the Paper
+hook boundary as well as through the standalone store API. The run used only a
+synthetic test world; it did not touch Fiesta's production world or measure a
+connected player's wait time.
