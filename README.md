@@ -131,21 +131,23 @@ and 15.4 s, but inspection of their saved Java harness showed they passed
 `generate=true`; those timings are not valid no-generation restore measurements
 and are not used as evidence here.
 
-The corrected disposable end-to-end cycle exercised the actual scheduler,
-leased offload API, Luna SFTP store, and asynchronous demand restore. Paper
-selected and offloaded a synthetic 8 KiB region, then restored its remote-only
-bundle when `World.getChunkAtAsync(..., generate=false)` requested a chunk in
-that region. The restored file SHA-256 matched, the marker cleared, Luna test
-usage returned to zero, and a tick monitor saw no gap above 500 ms. The
-callback took 27.379 s and returned `null`: the synthetic region file contained
-no actual chunk. This validates marker-driven file restoration, but not loading
-a real chunk or the player experience. A real-chunk fixture was attempted but
-Paper's access tracker marked the region during startup, preventing the cold
-offload precondition from being met. The zero-byte free-space reserve was
-test-only. All runs used isolated worlds and did not touch Fiesta data. Crash
-and outage recovery, concurrent player movement, normal-region throughput, and
-production-scale transfers remain unverified. Automatic eviction stays off on
-Fiesta until those gates pass.
+An earlier disposable end-to-end cycle exercised the actual scheduler, leased
+offload API, Luna SFTP store, and asynchronous restore with a synthetic 8 KiB
+region. The file checksum matched and the marker cleared, but its callback
+took 27.379 s and returned `null` because the region contained no actual chunk.
+That timing remains unexplained and is not a player-latency measurement.
+
+A later disposable Paper 1.21.11 runtime test used saved chunks and a local
+directory-object-store fixture. During an 8-second staged upload, the test
+requested a saved diamond-block chunk; Paper returned the existing block and
+canceled eviction, leaving the local region intact without a marker or remote
+object. The maximum observed tick gap was 71 ms. In a separate path, a saved
+gold-block chunk was offloaded and restored with its block intact; the marker
+cleared, the local region was present, and the fixture's remote copy was
+removed. This validates concurrent access and saved-chunk restore against the
+local fixture. It is not a connected-player, Luna-network, or player-facing
+latency test. Crash/outage recovery, normal-region throughput, and production-
+scale transfers remain unverified. Automatic eviction stays off on Fiesta.
 
 A follow-up changed small manifest reads to use stdout over the pinned SSH
 connection instead of a separate SFTP transfer. A real Luna smoke test using a

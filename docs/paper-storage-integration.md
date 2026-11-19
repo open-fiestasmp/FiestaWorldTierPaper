@@ -100,12 +100,31 @@ player-facing behavior.
 
 Earlier callback figures of 23.2 and 15.4 seconds came from a saved harness
 that passed `generate=true`, despite earlier notes saying otherwise; they are
-not valid no-generation restore measurements. A real-chunk fixture was
-attempted, but Paper's access tracker marked its region during startup, so it
-could not meet the cold-offload precondition. A valid real-chunk restore test
-is still needed. The zero-byte local free-space reserve was used only in the
-disposable test; all runs were isolated and did not touch Fiesta data. The
-scheduler is not installed on Fiesta.
+not valid no-generation restore measurements. A later saved-chunk test is
+recorded below. The zero-byte local free-space reserve was used only in the
+synthetic disposable test; all runs were isolated and did not touch Fiesta
+data. The scheduler is not installed on Fiesta.
+
+### Staged access and saved-chunk restore test
+
+On 2026-11-19, a disposable patched Paper 1.21.11 server exercised the actual
+staged offload hook and Python CLI using a local directory-object-store fixture.
+The fixture contained saved chunks with known diamond and gold blocks. During
+an 8-second delayed publish for the diamond region, the test requested the
+existing chunk with generation disabled and verified its block. Paper's final
+lease/access checks canceled eviction: the local region remained, no
+remote-only marker was written, and no remote object was published. The maximum
+observed tick gap during that upload was 71 ms. This demonstrates that this
+Paper path preserved a region used during upload; it was an internal chunk
+request, not a connected player session.
+
+A separate saved gold-block region completed offload and demand restore. The
+restore returned the existing chunk with its gold block intact, cleared the
+marker, left the local region present, and removed the fixture's remote object.
+This verifies saved-chunk serialization and restore against the local fixture.
+It does not test Luna networking or player-facing latency. The earlier
+27.379-second synthetic-region callback remains unexplained and is not
+representative of this test. The scheduler is not installed on Fiesta.
 
 If a process crashes during upload, local region files remain authoritative
 and the staged snapshot is retained temporarily for recovery. Seven-day cleanup
@@ -120,10 +139,10 @@ hash-guarded deletion to one SSH command under the remote writer lock and
 measured 0.50 seconds for manifest read, 5.45 seconds for verified fetch, and
 2.02 seconds for deletion. The fetched SHA-256 matched and each isolated test
 root was removed. These store stages total 7.97 seconds. The post-optimization
-Paper callback took 27.379 seconds; the gap is unexplained and needs
-investigation. Crash/outage recovery, concurrent player movement, real-chunk
-restore latency, and production-scale transfers remain unverified. Do not
-enable offloading on a live world until those gates pass on disposable copies.
+synthetic-region Paper callback took 27.379 seconds; the gap is unexplained. Do
+not enable automatic offloading on Fiesta until the staged flow is exercised
+against the actual Luna endpoint and restart/crash recovery, outage behavior,
+and player-facing movement/latency are tested on disposable copies.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
