@@ -2,6 +2,7 @@ package org.openfiestasmp.worldtier.test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -23,7 +24,33 @@ public final class FiestaTierE2E extends JavaPlugin {
             }
             final int chunkX = Integer.getInteger("fiesta.test.chunkX", 0);
             final int chunkZ = Integer.getInteger("fiesta.test.chunkZ", 0);
-            world.getChunkAt(chunkX, chunkZ);
+            if (!(mode.equals("seed") || mode.equals("verify") || mode.equals("outage"))) {
+                throw new IllegalArgumentException("unsupported test mode");
+            }
+            final long loadStartedNanos = System.nanoTime();
+            world.getChunkAtAsync(chunkX, chunkZ, mode.equals("seed")).whenComplete((chunk, failure) -> {
+                final long chunkLoadMillis = TimeUnit.NANOSECONDS.toMillis(
+                    System.nanoTime() - loadStartedNanos
+                );
+                Bukkit.getScheduler().runTask(this, () -> finishProbe(
+                    mode, world, chunkX, chunkZ, chunk, failure, chunkLoadMillis
+                ));
+            });
+        } catch (final Throwable error) {
+            finishFailure(mode, error);
+        }
+    }
+
+    private void finishProbe(String mode, World world, int chunkX, int chunkZ,
+                             org.bukkit.Chunk chunk, Throwable failure, long chunkLoadMillis) {
+        try {
+            if (failure != null) {
+                finishFailure(mode, failure);
+                return;
+            }
+            if (chunk == null) {
+                throw new IllegalStateException("Paper completed chunk load without a chunk");
+            }
             final int blockX = chunkX * 16 + 1;
             final int blockZ = chunkZ * 16 + 1;
             final Material actual = world.getBlockAt(blockX, 80, blockZ).getType();
@@ -31,39 +58,30 @@ public final class FiestaTierE2E extends JavaPlugin {
                 case "seed" -> {
                     world.getBlockAt(blockX, 80, blockZ).setType(Material.GOLD_BLOCK);
                     world.save();
-                    report("SEEDED");
+                    report("SEEDED:" + chunkLoadMillis + "ms");
                 }
                 case "verify" -> {
                     if (actual != Material.GOLD_BLOCK) {
                         throw new IllegalStateException("expected GOLD_BLOCK, found " + actual);
                     }
-                    report("RESTORED");
+                    report("RESTORED:" + chunkLoadMillis + "ms");
                 }
                 case "outage" -> report("OUTAGE_RETURNED:" + actual);
                 default -> throw new IllegalArgumentException("unsupported test mode");
             }
         } catch (final Throwable error) {
-            getLogger().severe("FIESTA_TIER_E2E_EXCEPTION: " + error);
-            for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
-                getLogger().severe("FIESTA_TIER_E2E_CAUSE: " + cause);
-            }
-            if ("outage".equals(mode) && isWorldTierFailure(error)) {
-                report("FAILED_CLOSED");
-            } else {
-                report("FAILED:" + error.getClass().getSimpleName());
-            }
+            finishFailure(mode, error);
         } finally {
             Bukkit.shutdown();
         }
     }
 
-    private static boolean isWorldTierFailure(final Throwable error) {
-        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-            if (cause.getClass().getName().contains("FiestaWorldTierRestoreException")) {
-                return true;
-            }
+    private void finishFailure(String mode, Throwable error) {
+        getLogger().severe("FIESTA_TIER_E2E_EXCEPTION: " + error);
+        for (Throwable cause = error.getCause(); cause != null; cause = cause.getCause()) {
+            getLogger().severe("FIESTA_TIER_E2E_CAUSE: " + cause);
         }
-        return false;
+        report("FAILED:" + error.getClass().getSimpleName());
     }
 
     private void report(final String result) {
