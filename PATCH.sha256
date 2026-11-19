@@ -4,3 +4,9 @@ fc3fa6a04beae625c911db0fad7322525258506bf5c9fdbea696fb87fe7951d0  paper-server/p
 e9175ed9ae8b6ec5c7f07e8584fcb63a85fa397ad9b9020b0ac0cd277e088395  paper-server/patches/features/0037-Add-region-leases-for-safe-world-tiering.patch
 f55243d7dae8bc977ef857be9510cabca36780359b76dc417540753a06da54ed  paper-server/patches/features/0038-Add-leased-region-offload-bridge.patch
 c86a3e6bd9f0e76ac730390e53d58cc19c9b1d61a98cee8a93921012a0c94ea2  paper-server/patches/features/0039-Add-opt-in-idle-world-tier-budget-scheduler.patch
+3f94c882f34691df288c3198b98a18d8111eb8b299ba4e656803b41a090358ab  paper-server/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/io/FiestaRegionAccessTracker.java
+fc83672b53e33d745991cbbfc180c1e6f252e75ba4a948f2816cd703f893fa92  paper-server/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/io/FiestaRegionLeaseManager.java
+c67b11da16b8bb6971803d271210057bf59ae120fd2548d01f287c3ededcd341  paper-server/src/main/java/net/minecraft/server/FiestaWorldTierScheduler.java
+062a2258d986e7c881945e1c77b8888d3e32d1117c51a5aef2f9fc2860b46ad5  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaRegionOffloader.java
+27cf9806c03771d70e3fad746b588a7615cf4674b881e9526a55e54370959399  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaRegionRestorer.java
+aea504fe6c7cca3efd3dbf875c2df5e78954f5644d7eea55031521596a686e76  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaWorldTierRestoreException.java

@@ -46,13 +46,18 @@ helpers:
 
 ## Build against Paper 1.21.11
 
-Use a clean Paper 1.21.11 source checkout. Copy the feature patches into
+Use a clean Paper 1.21.11 source checkout at upstream commit
+`c5eb0790f199da6c38d0a650e1e5cd5415b28185` (the current Fiesta server base).
+Copy the feature patches into
 `paper-server/patches/features/` after the existing feature patches, copy all
 six Java helpers to their matching `paper-server/src/main/java/` package paths,
-then run:
+verify the patch and helper inputs, then run:
 
 ```sh
-./gradlew applyPatches
+sha256sum -c PATCH.sha256
+GIT_AUTHOR_NAME='FiestaSMP Engineering' GIT_AUTHOR_EMAIL='noreply@github.com' \
+GIT_COMMITTER_NAME='FiestaSMP Engineering' GIT_COMMITTER_EMAIL='noreply@github.com' \
+  ./gradlew applyPatches
 ./gradlew createMojmapBundlerJar
 ```
 
@@ -124,6 +129,8 @@ use the local region during network upload; the access-age and source checks
 cancel eviction if the region was touched or changed. Demand restore still
 downloads a missing cold bundle when a player enters it. Its player-facing
 latency has not passed testing, so online mode is not enabled on Fiesta. The
+Paper scheduler passes the validated `cold_age_days` from the planner result to
+the leased offload API, keeping the final age check aligned with the CLI config.
 tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
 Paper server with a fake CLI shim. Earlier asynchronous probes reported 23.2 s
@@ -207,12 +214,16 @@ cancelled waiters do not block progress, the process lease excludes another
 file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
-exceptions. The complete isolated Paper 1.21.11 checkout applied all six
-patches and built `createMojmapBundlerJar`; the bundled server JAR contains the
-restore, lease, offload, access-tracker, and scheduler classes. The standalone
-Java fixtures pass, all 59 companion Python unit tests pass, and a separate
+exceptions. The complete isolated Paper checkout at the pinned Fiesta base
+applied all six patches and built `createMojmapBundlerJar`; the compiled server
+JAR contains the restore, lease, offload, access-tracker, and scheduler classes.
+The standalone Java fixtures pass, all 68 companion Python unit tests pass, and a separate
 Linux fixture confirmed that Python observes the Java process lock with
 `fcntl.lockf`.
+
+The compiled bundle also started in a disposable localhost-only Paper instance,
+created its three dimensions, reached `Done`, and shut down cleanly. This checks
+startup only; it does not exercise a remote-region restore or production data.
 
 A synthetic 1,048,607-byte region bundle also passed publish, manifest/hash
 read, verified batched fetch, checksum comparison, and hash-guarded deletion on

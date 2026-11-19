@@ -135,6 +135,16 @@ public final class FiestaWorldTierScheduler {
             || result.get("automatic_eviction_enabled").getAsBoolean()) {
             throw new IOException("Fiesta world-tier planner result did not satisfy the dry-run contract");
         }
+        if (!result.has("cold_age_days") || !result.get("cold_age_days").isJsonPrimitive()
+            || !result.getAsJsonPrimitive("cold_age_days").isNumber()) {
+            throw new IOException("Fiesta world-tier planner omitted its cold-age setting");
+        }
+        final double coldAgeMillisValue = result.get("cold_age_days").getAsDouble() * 86_400_000.0;
+        if (!Double.isFinite(coldAgeMillisValue) || coldAgeMillisValue <= 0.0
+            || coldAgeMillisValue > Long.MAX_VALUE) {
+            throw new IOException("Fiesta world-tier planner returned an invalid cold-age setting");
+        }
+        final long coldAgeMillis = (long)Math.ceil(coldAgeMillisValue);
         final JsonArray selected = result.getAsJsonArray("selected");
         if (selected == null || selected.size() == 0) {
             return List.of();
@@ -154,7 +164,7 @@ public final class FiestaWorldTierScheduler {
             if (!("overworld".equals(dimension) || "nether".equals(dimension) || "end".equals(dimension))) {
                 throw new IOException("Fiesta world-tier planner selected an unsupported dimension");
             }
-            candidates.add(new Selection(dimension, x, z));
+            candidates.add(new Selection(dimension, x, z, coldAgeMillis));
         }
         return List.copyOf(candidates);
     }
@@ -187,19 +197,20 @@ public final class FiestaWorldTierScheduler {
         LOGGER.info("Fiesta world-tier scheduler attempting cold region {}/r.{}.{}",
             selection.dimension(), selection.x(), selection.z());
         try {
-            MoonriseRegionFileIO.offloadRegion(world, selection.x(), selection.z()).whenComplete((ignored, error) -> {
-                executeOnServer(server, () -> {
-                    if (error == null) {
-                        LOGGER.info("Fiesta world-tier offloaded {}/r.{}.{}",
-                            selection.dimension(), selection.x(), selection.z());
-                        ACTIVE.set(false);
-                    } else {
-                        LOGGER.info("Fiesta world-tier skipped {}/r.{}.{}; trying the next cold candidate: {}",
-                            selection.dimension(), selection.x(), selection.z(), error);
-                        startSelectedOffload(server, selections, index + 1);
-                    }
+            MoonriseRegionFileIO.offloadRegion(world, selection.x(), selection.z(), selection.coldAgeMillis())
+                .whenComplete((ignored, error) -> {
+                    executeOnServer(server, () -> {
+                        if (error == null) {
+                            LOGGER.info("Fiesta world-tier offloaded {}/r.{}.{}",
+                                selection.dimension(), selection.x(), selection.z());
+                            ACTIVE.set(false);
+                        } else {
+                            LOGGER.info("Fiesta world-tier skipped {}/r.{}.{}; trying the next cold candidate: {}",
+                                selection.dimension(), selection.x(), selection.z(), error);
+                            startSelectedOffload(server, selections, index + 1);
+                        }
+                    });
                 });
-            });
         } catch (final RuntimeException ex) {
             LOGGER.info("Fiesta world-tier could not start {}/r.{}.{}; trying the next cold candidate",
                 selection.dimension(), selection.x(), selection.z(), ex);
@@ -241,5 +252,5 @@ public final class FiestaWorldTierScheduler {
         }
     }
 
-    private record Selection(String dimension, int x, int z) {}
+    private record Selection(String dimension, int x, int z, long coldAgeMillis) {}
 }

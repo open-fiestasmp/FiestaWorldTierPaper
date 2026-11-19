@@ -62,6 +62,9 @@ cleans abandoned stages older than seven days. It removes a matching remote
 duplicate only if there is no remote-only marker and the full local bundle
 remains. Each actual upload rechecks quota under the remote writer lock. The
 staged offload checks cold age under Paper's lease before and after upload.
+The Paper scheduler reads the validated `cold_age_days` from this plan output
+and passes the corresponding millisecond age to the leased offload API, keeping
+the final age check aligned with the CLI configuration.
 
 The command validates the marker's dimension, coordinates, state, and manifest hash,
 checks the configured world root, verifies the complete downloaded bundle,
