@@ -1,10 +1,10 @@
 From e882709fab92deb9cacc8ee0ae7c591c2b010be8 Mon Sep 17 00:00:00 2001
 From: FiestaSMP Engineering <noreply@github.com>
-Subject: [PATCH] Add opt-in idle world-tier budget scheduler
+Subject: [PATCH] Add opt-in world-tier budget scheduler
 
 The scheduler stays disabled unless both its interval and local byte target
-are explicitly configured. It plans one region at a time and requires the
-main server to be empty before planning and again before Paper's lease.
+are explicitly configured. Its implementation is included as a companion
+Java source file; idle-only mode is the default and online mode is opt-in.
 
 ---
  net/minecraft/server/MinecraftServer.java | 2 ++

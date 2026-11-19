@@ -27,7 +27,7 @@ helpers:
   the bundle.
 - `paper-server/patches/features/0039-...patch` refuses offload when region
   access tracking has failed for that dimension.
-- `paper-server/patches/features/0040-...patch` calls an optional idle-only
+- `paper-server/patches/features/0040-...patch` calls an optional
   budget scheduler from active and empty-server ticks. It stays disabled unless
   both a local byte target and scheduler interval are explicitly configured.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
@@ -42,8 +42,8 @@ helpers:
   synced, region-level read/write timestamps and fails closed on unknown or
   invalid history.
 - `paper-server/src/main/java/.../FiestaWorldTierScheduler.java` runs the
-  planner off-thread, asks for one oldest cold bundle at a time, and starts
-  Paper's leased offload only while the main server is empty.
+  planner off-thread and asks for up to eight cold candidates. Idle-only mode
+  is the default; explicit online mode relies on Paper's per-region checks.
 
 ## Build against Paper 1.21.11
 
@@ -101,7 +101,7 @@ eviction on a worker. The Python command verifies that Paper still holds the
 OS lock before it will offload. Java/Python lock interoperability was checked
 on Linux.
 
-The optional idle scheduler is implemented but disabled unless both
+The optional scheduler is implemented but disabled unless both
 `fiesta.worldTier.schedulerTargetBytes` and
 `fiesta.worldTier.schedulerIntervalSeconds` are set. For example, a 60 GB local
 world-data target with one planning pass per hour can be configured with:
@@ -110,14 +110,18 @@ world-data target with one planning pass per hour can be configured with:
 -Dfiesta.worldTier.schedulerTargetBytes=60000000000
 -Dfiesta.worldTier.schedulerIntervalSeconds=3600
 -Dfiesta.worldTier.schedulerPlanTimeoutSeconds=120
+-Dfiesta.worldTier.schedulerAllowOnline=true
 ```
 
-Each pass asks the companion CLI for at most one oldest eligible bundle, then
-rechecks that the main server is empty before invoking Paper's exclusive lease.
-The lease still rejects loaded or ticketed regions, and the CLI still checks
-access age, local reserve, and Luna quota. With the default 30-day cold age,
-regions accessed during rollout will not be candidates until they have aged
-past that threshold. The scheduler is not installed on Fiesta. Its tick
+Online mode is opt-in. Each pass asks the companion CLI for up to eight oldest
+eligible bundles and tries them one at a time. Paper's exclusive lease rejects
+loaded or ticketed regions, while the CLI checks access age, local reserve, and
+Luna quota. With the default 30-day cold age, regions accessed during rollout
+will not be candidates until they have aged past that threshold. A chunk request
+for the exact region being uploaded waits for the exclusive lease, then restores
+from Luna; other regions continue normally. Transfer and restore latency for
+that case has not passed the player-facing tests, so online mode is not enabled
+on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
 Paper server with a fake CLI shim. Earlier asynchronous probes reported 23.2 s
 and 15.4 s, but inspection of their saved Java harness showed they passed

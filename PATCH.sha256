@@ -4,4 +4,4 @@ fc3fa6a04beae625c911db0fad7322525258506bf5c9fdbea696fb87fe7951d0  paper-server/p
 e9175ed9ae8b6ec5c7f07e8584fcb63a85fa397ad9b9020b0ac0cd277e088395  paper-server/patches/features/0037-Add-region-leases-for-safe-world-tiering.patch
 d8af845d74fc6481effe768ff5631b977a4942c94d4e75190f2895b13474fbf5  paper-server/patches/features/0038-Add-leased-region-offload-bridge.patch
 93e9d7c7f826ccf286d3934e86f9d98f43e4001ce7fa851449d5e27980831816  paper-server/patches/features/0039-Require-healthy-access-tracking-for-region-offload.patch
-69e1519144c52b05c10b19b5a01ce99421c81af47bee517285169536473b4b02  paper-server/patches/features/0040-Add-opt-in-idle-world-tier-budget-scheduler.patch
+c86a3e6bd9f0e76ac730390e53d58cc19c9b1d61a98cee8a93921012a0c94ea2  paper-server/patches/features/0040-Add-opt-in-idle-world-tier-budget-scheduler.patch

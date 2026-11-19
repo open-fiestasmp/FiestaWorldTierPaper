@@ -79,11 +79,15 @@ This hook covers demand restore and prevents missing remote data from being
 treated as new terrain. The Paper patch includes an explicit leased offload
 API and the Python `offload` command, which requires Paper's held OS file lock.
 Paper tracking failures disable offload for that dimension.
-Paper patch `0040` adds an opt-in idle-only scheduler that plans one bundle per
-pass; it is disabled unless its target and interval system properties are both
-set. It checks that the main server is empty before planning and again before
-asking Paper for the exclusive region lease. Paper patch `0039` refuses offload
-after an access-tracking failure. On a disposable Paper server, the scheduler's
+Paper patch `0040` adds an opt-in scheduler that is disabled unless its target
+and interval system properties are both set. It defaults to idle-only mode.
+With `fiesta.worldTier.schedulerAllowOnline=true`, it can try up to eight cold
+regions while other areas remain active; Paper's exclusive lease rejects a
+region with holders or tickets. A player request for the exact region being
+uploaded waits for the transfer to finish before demand restore can start. That
+per-region wait and online movement behavior still need latency testing. Paper
+patch `0039` refuses offload after an access-tracking failure. On a disposable
+Paper server, the scheduler's
 tick dispatch and invocation of the leased API were exercised using a fake CLI
 shim. A corrected disposable
 Paper 1.21.11 cycle then used the actual scheduler, Luna SFTP store, and
