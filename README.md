@@ -119,13 +119,14 @@ access age, local reserve, and Luna quota. With the default 30-day cold age,
 regions accessed during rollout will not be candidates until they have aged
 past that threshold. The scheduler is not installed on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
-Paper server with a fake CLI shim. An earlier disposable Paper restore through
-Luna succeeded, but the forced load took about 27 seconds and triggered Paper
-watchdog dumps. The batched transport change has since passed a synthetic Luna
-transfer, but the Paper restore path has not yet been rerun with that change.
-Crash recovery, outage recovery, concurrent player movement, and production-
-scale region transfers remain unverified. Automatic eviction stays off on
-Fiesta until those gates pass.
+Paper server with a fake CLI shim. After the batched transport change, a
+disposable Paper 1.21.11 server restored a synthetic spawn-region bundle from
+Luna on a forced chunk load. The restored region SHA-256 matched the original,
+the durable marker cleared, and the remote test object was consumed; the unique
+test root was then removed. This used an isolated world and did not touch Fiesta
+world data. Crash recovery, outage recovery, concurrent player movement,
+player-facing restore latency, and production-scale region transfers remain
+unverified. Automatic eviction stays off on Fiesta until those gates pass.
 
 The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the

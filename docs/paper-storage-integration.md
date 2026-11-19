@@ -85,15 +85,15 @@ set. It checks that the main server is empty before planning and again before
 asking Paper for the exclusive region lease. Paper patch `0039` refuses offload
 after an access-tracking failure. On a disposable Paper server, the scheduler's
 tick dispatch and invocation of the leased API were exercised using a fake CLI
-shim. An earlier disposable Paper demand-restore through Luna succeeded, but
-the forced load took about 27 seconds and triggered watchdog dumps. The Python
-transport has since passed a synthetic 1,048,607-byte Luna transfer: verified
-fetch took 9.4 seconds with SSH multiplexing enabled and used one SFTP batch
-for all bundle members plus a final manifest check. The Paper demand-restore
-path has not yet been rerun after that transport change. Crash/outage recovery,
-player movement into a cold region, and production-scale transfers remain
-untested. The scheduler is not installed on Fiesta. Do not enable offloading
-on a live world until those remaining gates pass on disposable copies.
+shim. After the batched transport change, a disposable Paper 1.21.11 server
+restored a synthetic spawn-region bundle from Luna on a forced chunk load. The
+restored region SHA-256 matched the original, the durable marker cleared, and
+the remote test object was consumed; the unique test root was then removed.
+This test used an isolated world and did not touch Fiesta world data. Crash and
+outage recovery, concurrent player movement, player-facing restore latency,
+and production-scale transfers remain untested. The scheduler is not installed
+on Fiesta. Do not enable offloading on a live world until those remaining gates
+pass on disposable copies.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
