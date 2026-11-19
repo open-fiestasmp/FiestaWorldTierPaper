@@ -149,6 +149,18 @@ local fixture. It is not a connected-player, Luna-network, or player-facing
 latency test. Crash/outage recovery, normal-region throughput, and production-
 scale transfers remain unverified. Automatic eviction stays off on Fiesta.
 
+A subsequent disposable Paper 1.21.11 run used a dedicated temporary object
+root on the actual Luna host. With SSH multiplexing enabled, a 1.19 MiB region
+was published during a staged upload, then eviction was canceled after a chunk
+access; the local region remained and the remote duplicate was cleaned. The
+maximum tick gap was 61 ms. A separate 651 KiB saved region offloaded and
+restored with the gold block intact and marker cleared. Publish took 17.1 s
+and restore 8.5 s; without multiplexing, the same region took 41.0 s and
+29.8 s. This was an internal chunk request, not a player session, and the
+restore delay remains noticeable. Crash/outage recovery and player-facing
+latency still need validation. Test roots were removed; Fiesta's live worlds
+were untouched.
+
 A follow-up changed small manifest reads to use stdout over the pinned SSH
 connection instead of a separate SFTP transfer. A real Luna smoke test using a
 different synthetic 8 KiB bundle measured 0.50 seconds for manifest read, 5.40

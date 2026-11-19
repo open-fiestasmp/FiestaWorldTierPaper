@@ -126,6 +126,40 @@ It does not test Luna networking or player-facing latency. The earlier
 27.379-second synthetic-region callback remains unexplained and is not
 representative of this test. The scheduler is not installed on Fiesta.
 
+### Luna endpoint integration test
+
+On 2026-11-19, the same disposable Paper 1.21.11 harness ran against a
+dedicated temporary object root on Luna, using the pinned SSH host key and a
+short private `ControlPath`. During the staged upload of a 1.19 MiB saved
+region, Paper loaded the chunk; remote usage showed the published object, then
+final validation canceled eviction. The local region remained, no marker was
+written, and abort cleanup returned remote usage to zero. Maximum observed
+tick gap was 61 ms.
+
+A second saved region (651 KiB) completed offload and demand restore through
+Luna. The publish step took 17.065 seconds, finalization 0.534 seconds, and
+the restore command 8.486 seconds. `getChunkAtAsync(..., generate=false)`
+returned the saved gold-block chunk, the marker cleared, and remote usage
+returned to zero. In an earlier run without SSH multiplexing, the same-size
+region took 41.027 seconds to publish and 29.815 seconds to restore. Thus
+multiplexing materially reduces connection overhead, but the remaining restore
+time is still visible and needs improvement before a player-facing rollout.
+The test used only synthetic disposable-world chunks; it did not connect a
+player or touch Fiesta's live worlds. All temporary Luna roots were removed.
+
+A repeat with SSH compression enabled took 16.604 seconds to publish and 8.632
+seconds to restore, effectively unchanged from the multiplexed run without
+compression (17.065 and 8.486 seconds). Compression remains configurable for
+bandwidth-limited links, but these end-to-end measurements do not show a
+reliable latency gain from it; the measured improvement came from connection
+multiplexing.
+
+The test also exposed an OpenSSH Unix-domain socket path limit: a long
+`ControlPath` failed before transfer. `OpenSSHConfig.validate()` now rejects a
+template whose `%C`-expanded path exceeds 80 bytes, leaving room for OpenSSH's
+temporary socket suffix. Keep the control socket directory private and the
+path short.
+
 If a process crashes during upload, local region files remain authoritative
 and the staged snapshot is retained temporarily for recovery. Seven-day cleanup
 removes an abandoned remote duplicate only when the local bundle is complete,
@@ -139,10 +173,11 @@ hash-guarded deletion to one SSH command under the remote writer lock and
 measured 0.50 seconds for manifest read, 5.45 seconds for verified fetch, and
 2.02 seconds for deletion. The fetched SHA-256 matched and each isolated test
 root was removed. These store stages total 7.97 seconds. The post-optimization
-synthetic-region Paper callback took 27.379 seconds; the gap is unexplained. Do
-not enable automatic offloading on Fiesta until the staged flow is exercised
-against the actual Luna endpoint and restart/crash recovery, outage behavior,
-and player-facing movement/latency are tested on disposable copies.
+synthetic-region Paper callback took 27.379 seconds; the gap is unexplained.
+Later saved-chunk testing against Luna passed, with an 8.5-second restore.
+Automatic offloading remains disabled on Fiesta until restart/crash recovery,
+outage behavior, and player-facing movement/latency are tested on disposable
+copies.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
