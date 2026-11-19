@@ -161,6 +161,19 @@ restore delay remains noticeable. Crash/outage recovery and player-facing
 latency still need validation. Test roots were removed; Fiesta's live worlds
 were untouched.
 
+A follow-up direct SFTP benchmark downloaded the same 651 KiB synthetic region
+twice with each buffer setting. The default 32 KiB buffer took 5.12 and 4.07
+seconds; 256 KiB took 3.67 and 3.57 seconds. The client uses 256 KiB for
+download-only batches; uploads keep the 32 KiB default because Luna rejected
+256 KiB write packets. This improved the small download benchmark by about 21%,
+but the full Paper restore cycle still needs a repeat at that setting.
+
+With the larger download buffer and hash-guarded single-command cleanup, a
+disposable 651 KiB storage restore took 0.50 seconds for the manifest, 6.00
+seconds for fetch, and 0.57 seconds for cleanup (7.07 seconds total). The
+checksum matched and Luna test usage returned to zero. This was a storage API
+measurement, not a Paper callback or connected-player latency test.
+
 A follow-up changed small manifest reads to use stdout over the pinned SSH
 connection instead of a separate SFTP transfer. A real Luna smoke test using a
 different synthetic 8 KiB bundle measured 0.50 seconds for manifest read, 5.40
