@@ -11,13 +11,14 @@ diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileI
 index d0faf7d..03a4985 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileIO.java
-@@ -29,6 +29,9 @@ import java.lang.invoke.VarHandle;
+@@ -29,6 +29,10 @@ import java.lang.invoke.VarHandle;
  import java.nio.file.Path;
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.CompletionException;
 +import java.util.concurrent.ConcurrentHashMap;
 +import java.util.concurrent.ExecutorService;
 +import java.util.concurrent.Executors;
++import java.util.UUID;
  import java.util.concurrent.atomic.AtomicInteger;
  import java.util.concurrent.atomic.AtomicLong;
  import java.util.function.BiConsumer;
@@ -64,15 +65,19 @@ index d0faf7d..03a4985 100644
                          lease.close();
                          result.completeExceptionally(thr);
                      }
-@@ -132,16 +151,65 @@ public final class MoonriseRegionFileIO {
+@@ -132,16 +151,99 @@ public final class MoonriseRegionFileIO {
          return result;
      }
  
 +    /**
-+     * Offloads one region on a dedicated worker while holding Paper's exclusive
-+     * region lease for the child process's full upload and local eviction.
++     * Offloads one region by staging under a short lease, uploading without a
++     * lease, and reacquiring before final access and source checks.
 +     */
-+    public static CompletableFuture<Void> offloadRegion(final ServerLevel world, final int regionX, final int regionZ) {
++    public static CompletableFuture<Void> offloadRegion(final ServerLevel world, final int regionX, final int regionZ,
++                                                        final long coldAgeMillis) {
++        if (coldAgeMillis <= 0L) {
++            return CompletableFuture.failedFuture(new IllegalArgumentException("Cold age must be positive"));
++        }
 +        final Path regionFolder = ((ChunkSystemRegionFileStorage)getControllerFor(world, RegionFileType.CHUNK_DATA)
 +            .getCache()).moonrise$getRegionFolder();
 +        final Path dimensionRoot = regionFolder.getParent();
@@ -85,17 +90,47 @@ index d0faf7d..03a4985 100644
 +        }
 +
 +        final CompletableFuture<Void> result = new CompletableFuture<>();
++        final String snapshotId = UUID.randomUUID().toString();
 +        try {
 +            TIERING_EXECUTOR.execute(() -> {
++                String manifestHash = null;
 +                try {
 +                    try (final RegionTieringLease lease = acquireTieringLease(world, regionX, regionZ).join()) {
-+                        net.minecraft.world.level.chunk.storage.FiestaRegionOffloader.offload(
-+                            dimensionRoot, world.dimension().identifier().toString(), regionX, regionZ
++                        if (!FiestaRegionAccessTracker.isTrackingHealthy(dimensionRoot)) {
++                            throw new IllegalStateException("Region access tracking is unhealthy; refusing offload");
++                        }
++                        if (!FiestaRegionAccessTracker.isCold(dimensionRoot, regionX, regionZ, coldAgeMillis)) {
++                            throw new IllegalStateException("Region was accessed recently; refusing snapshot");
++                        }
++                        net.minecraft.world.level.chunk.storage.FiestaRegionOffloader.snapshot(
++                            dimensionRoot, world.dimension().identifier().toString(), regionX, regionZ, snapshotId
++                        );
++                    }
++                    manifestHash = net.minecraft.world.level.chunk.storage.FiestaRegionOffloader.publish(
++                        world.dimension().identifier().toString(), regionX, regionZ, snapshotId
++                    );
++                    try (final RegionTieringLease lease = acquireTieringLease(world, regionX, regionZ).join()) {
++                        if (!FiestaRegionAccessTracker.isTrackingHealthy(dimensionRoot)) {
++                            throw new IllegalStateException("Region access tracking is unhealthy; refusing offload");
++                        }
++                        if (!FiestaRegionAccessTracker.isCold(dimensionRoot, regionX, regionZ, coldAgeMillis)) {
++                            throw new IllegalStateException("Region became active during upload; retaining local files");
++                        }
++                        net.minecraft.world.level.chunk.storage.FiestaRegionOffloader.finalizeOffload(
++                            dimensionRoot, world.dimension().identifier().toString(), regionX, regionZ,
++                            snapshotId, manifestHash
 +                        );
 +                    }
 +                    result.complete(null);
 +                } catch (final Throwable thr) {
 +                    final Throwable cause = thr instanceof CompletionException && thr.getCause() != null ? thr.getCause() : thr;
++                    try {
++                        net.minecraft.world.level.chunk.storage.FiestaRegionOffloader.abort(
++                            world.dimension().identifier().toString(), regionX, regionZ, snapshotId, manifestHash
++                        );
++                    } catch (final IOException abortFailure) {
++                        cause.addSuppressed(abortFailure);
++                    }
 +                    result.completeExceptionally(cause);
 +                } finally {
 +                    PENDING_TIERING.remove(operationKey);

@@ -17,26 +17,24 @@ preserving region data over keeping the server online during a remote-store
 failure.
 
 Patch `0038` exposes the experimental
-`MoonriseRegionFileIO.offloadRegion(world, regionX, regionZ)` API. Paper checks
-the region on its main thread, closes cached terrain/entity/POI files, then
-holds the exclusive region lease while a worker runs the companion `offload`
-command. The command refuses to proceed unless it can verify Paper's live
-cross-process file lock. This Java/Python lock handoff has been checked on
-Linux.
-
-Patch `0039` refuses offload when Paper's region access tracker has failed for
-that dimension. This keeps an unreadable or unwritable access catalog from
-being treated as proof that a region is cold.
+`MoonriseRegionFileIO.offloadRegion(world, regionX, regionZ, coldAgeMillis)`
+API and fails closed if access tracking is unhealthy. It copies the complete
+region bundle to a private staging directory while holding Paper's exclusive
+region lease and a Linux process lock. Network upload and verification run
+after the lease is released. Paper then reacquires the lease, checks that the
+region is still cold and every source file still has the same identity, and
+only then writes the durable marker and evicts the local bundle. Companion
+commands verify Paper's process lock during snapshot and finalization. The
+Java/Python lock handoff has been checked on Linux.
 
 Patch `0037` adds a fair per-region lease around Moonrise asynchronous chunk
 reads and writes and Paper's synchronous region read, scan, and write paths.
 `MoonriseRegionFileIO.acquireTieringLease(world, regionX, regionZ)` waits for
 those operations, checks on the server thread that the region has no chunk
 holders or tickets, and closes the cached terrain, entity, and POI region
-files. A caller must hold the returned lease through the complete offload and
-durable journal transition, and run network and filesystem transfer work off
-the server thread. There is not yet an automatic eviction caller; the lease
-seam alone does not make production offload ready.
+files. Network transfers run outside this lease. The short snapshot and final
+eviction phases run on a worker, not the server thread. Staging needs extra
+local disk space equal to the selected region bundle.
 
 Install the Python package on the Paper host so the command is available at
 `/usr/local/bin/fiesta-world-tier`. Place its configuration at
@@ -57,9 +55,13 @@ under `<dimension-root>/.world-tier/access/`. It syncs a first touch and
 throttles repeated writes to the configured interval. Missing or invalid
 history is treated as hot. The companion `catalog` command seeds existing
 local regions conservatively, and `candidates` provides a dry-run list using
-the configured age and `protected_regions`. Candidate listing is not a local
-budget controller; the offload command applies the same configured age check
-again while the Paper lock is held.
+the configured age and `protected_regions`. The `plan` command estimates
+complete local bundles against the configured byte budget and advisory Luna
+quota; it does not start a live-region offload. Before measuring quota, it
+cleans abandoned stages older than seven days. It removes a matching remote
+duplicate only if there is no remote-only marker and the full local bundle
+remains. Each actual upload rechecks quota under the remote writer lock. The
+staged offload checks cold age under Paper's lease before and after upload.
 
 The command validates the marker's dimension, coordinates, state, and manifest hash,
 checks the configured world root, verifies the complete downloaded bundle,
@@ -76,20 +78,17 @@ full-bundle verification.
 ## Scope and current safety boundary
 
 This hook covers demand restore and prevents missing remote data from being
-treated as new terrain. The Paper patch includes an explicit leased offload
-API and the Python `offload` command, which requires Paper's held OS file lock.
-Paper tracking failures disable offload for that dimension.
-Paper patch `0040` adds an opt-in scheduler that is disabled unless its target
-and interval system properties are both set. It defaults to idle-only mode.
-With `fiesta.worldTier.schedulerAllowOnline=true`, it can try up to eight cold
-regions while other areas remain active; Paper's exclusive lease rejects a
-region with holders or tickets. A player request for the exact region being
-uploaded waits for the transfer to finish before demand restore can start. That
-per-region wait and online movement behavior still need latency testing. Paper
-patch `0039` refuses offload after an access-tracking failure. On a disposable
-Paper server, the scheduler's
-tick dispatch and invocation of the leased API were exercised using a fake CLI
-shim. A corrected disposable
+treated as new terrain. The staged offload API uses Paper's OS lock for a short
+snapshot and finalization, while the network upload runs without the region
+lease. If a player accesses or changes a region during upload, final checks
+cancel eviction and preserve its local files. The opt-in scheduler in patch
+`0039` is disabled unless its target and interval system properties are set;
+it defaults to idle-only mode. With
+`fiesta.worldTier.schedulerAllowOnline=true`, it can try up to eight cold
+regions while other areas remain active. Paper rejects loaded or ticketed
+regions and access-tracking failures disable offload. On a disposable Paper
+server, the scheduler's tick dispatch and invocation of the staged API were
+exercised using a fake CLI shim. A corrected disposable
 Paper 1.21.11 cycle then used the actual scheduler, Luna SFTP store, and
 `World.getChunkAtAsync(..., generate=false)` with a synthetic 8 KiB region.
 Paper offloaded the remote-only bundle and restored it on demand. The file
@@ -107,6 +106,12 @@ could not meet the cold-offload precondition. A valid real-chunk restore test
 is still needed. The zero-byte local free-space reserve was used only in the
 disposable test; all runs were isolated and did not touch Fiesta data. The
 scheduler is not installed on Fiesta.
+
+If a process crashes during upload, local region files remain authoritative
+and the staged snapshot is retained temporarily for recovery. Seven-day cleanup
+removes an abandoned remote duplicate only when the local bundle is complete,
+the manifest exactly matches the snapshot, and there is no remote-only marker.
+If a durable marker exists, cleanup preserves the remote bundle.
 
 A Luna store smoke test changed small manifest reads to stdout over the pinned
 SSH connection. It measured 0.50 seconds for manifest read, 5.40 seconds for

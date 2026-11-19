@@ -5,7 +5,7 @@ Paper treats missing local data as empty terrain and for coordinating an
 explicit, leased offload call. This project is GPL-3.0
 because it changes Paper's GPL-licensed storage code.
 
-The implementation consists of seven ordered Paper patches and six small Java
+The implementation consists of six ordered Paper patches and six small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
@@ -22,12 +22,11 @@ helpers:
   holders or tickets, and closes cached terrain/entity/POI files before a
   tiering operation proceeds.
 - `paper-server/patches/features/0038-...patch` exposes an experimental
-  offload call on a dedicated worker. It holds Paper's exclusive in-process
-  lease and a Linux process lock while the companion command uploads and evicts
-  the bundle.
-- `paper-server/patches/features/0039-...patch` refuses offload when region
-  access tracking has failed for that dimension.
-- `paper-server/patches/features/0040-...patch` calls an optional
+  staged offload call and refuses offload when region access tracking has
+  failed. It snapshots under a short Paper lease, uploads without the lease,
+  then reacquires the lease and checks cold age and source identity before
+  evicting local files.
+- `paper-server/patches/features/0039-...patch` calls an optional
   budget scheduler from active and empty-server ticks. It stays disabled unless
   both a local byte target and scheduler interval are explicitly configured.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
@@ -57,7 +56,7 @@ then run:
 ./gradlew createMojmapBundlerJar
 ```
 
-All seven patches are ordered and version-specific. Rebase and rebuild them
+All six patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
@@ -95,11 +94,14 @@ I/O errors and never become empty-region reads.
 
 This integration provides demand restore and an experimental
 `MoonriseRegionFileIO.offloadRegion(...)` API. It checks the region on Paper's
-main thread, closes cached files, then holds both the in-process lease and a
-cross-process file lock while the companion command completes upload and local
-eviction on a worker. The Python command verifies that Paper still holds the
-OS lock before it will offload. Java/Python lock interoperability was checked
-on Linux.
+main thread and closes cached files. A worker holds the in-process lease and
+cross-process file lock only while making an independent, verified snapshot;
+network upload runs after that lease is released. The worker reacquires the
+lease before checking region age and file identity, writing the durable marker,
+and removing local files. If a player uses the region during upload, the final
+checks preserve the local bundle. Staging requires temporary local disk space
+equal to the bundle being transferred. Java/Python lock interoperability was
+checked on Linux.
 
 The optional scheduler is implemented but disabled unless both
 `fiesta.worldTier.schedulerTargetBytes` and
@@ -117,11 +119,12 @@ Online mode is opt-in. Each pass asks the companion CLI for up to eight oldest
 eligible bundles and tries them one at a time. Paper's exclusive lease rejects
 loaded or ticketed regions, while the CLI checks access age, local reserve, and
 Luna quota. With the default 30-day cold age, regions accessed during rollout
-will not be candidates until they have aged past that threshold. A chunk request
-for the exact region being uploaded waits for the exclusive lease, then restores
-from Luna; other regions continue normally. Transfer and restore latency for
-that case has not passed the player-facing tests, so online mode is not enabled
-on Fiesta. Its tick
+will not be candidates until they have aged past that threshold. A player can
+use the local region during network upload; the access-age and source checks
+cancel eviction if the region was touched or changed. Demand restore still
+downloads a missing cold bundle when a player enters it. Its player-facing
+latency has not passed testing, so online mode is not enabled on Fiesta. The
+tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
 Paper server with a fake CLI shim. Earlier asynchronous probes reported 23.2 s
 and 15.4 s, but inspection of their saved Java harness showed they passed
@@ -177,10 +180,10 @@ cancelled waiters do not block progress, the process lease excludes another
 file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
-exceptions. The complete isolated Paper 1.21.11 checkout applied all seven
+exceptions. The complete isolated Paper 1.21.11 checkout applied all six
 patches and built `createMojmapBundlerJar`; the bundled server JAR contains the
 restore, lease, offload, access-tracker, and scheduler classes. The standalone
-Java fixtures pass, all 53 companion Python unit tests pass, and a separate
+Java fixtures pass, all 59 companion Python unit tests pass, and a separate
 Linux fixture confirmed that Python observes the Java process lock with
 `fcntl.lockf`.
 
