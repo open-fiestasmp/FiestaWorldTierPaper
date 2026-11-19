@@ -23,7 +23,7 @@ final class FiestaRegionRestorer {
     private static final String DEFAULT_COMMAND = "/usr/local/bin/fiesta-world-tier";
     private static final String DEFAULT_CONFIG = "/etc/fiesta-world-tier/config.json";
     private static final long DEFAULT_TIMEOUT_SECONDS = 300L;
-    private static final Pattern MARKER_STATE = Pattern.compile("\\\"state\\\"\\s*:\\s*\\\"(REMOTE_ONLY|RESTORING)\\\"");
+    private static final Pattern MARKER_STATE = Pattern.compile("\\\"state\\\"\\s*:\\s*\\\"(REMOTE_ONLY|EVICTING|RESTORING)\\\"");
     private static final Object[] LOCKS = new Object[256];
 
     static {
@@ -62,6 +62,21 @@ final class FiestaRegionRestorer {
      * an original bundle may not have contained entity or POI data.
      */
     static boolean restoreIfMarked(
+        final Path storageFolder,
+        final String dimensionKey,
+        final int chunkX,
+        final int chunkZ
+    ) throws IOException {
+        try {
+            return restoreIfMarkedInternal(storageFolder, dimensionKey, chunkX, chunkZ);
+        } catch (final FiestaWorldTierRestoreException ex) {
+            throw ex;
+        } catch (final IOException | RuntimeException ex) {
+            throw new FiestaWorldTierRestoreException("Fiesta world-tier region recovery failed", ex);
+        }
+    }
+
+    private static boolean restoreIfMarkedInternal(
         final Path storageFolder,
         final String dimensionKey,
         final int chunkX,
@@ -175,7 +190,7 @@ final class FiestaRegionRestorer {
         }
     }
 
-    private static String markerState(final Path marker) throws IOException {
+    static String markerState(final Path marker) throws IOException {
         validateMarker(marker);
         final String contents = Files.readString(marker, java.nio.charset.StandardCharsets.UTF_8);
         final Matcher matcher = MARKER_STATE.matcher(contents);

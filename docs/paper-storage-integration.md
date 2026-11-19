@@ -9,8 +9,12 @@ trusting Moonrise's negative cache. Any marker triggers recovery, because a
 surviving terrain `.mca` does not prove that the entity, POI, or oversized chunk
 files survived an interrupted eviction.
 The child receives an argument vector (no shell), a minimal environment, a
-bounded timeout, and a private configuration path. A failed restore propagates
-as an I/O error; it cannot silently become an empty world region.
+bounded timeout, and a private configuration path. A failed restore is marked
+with a dedicated I/O exception. Moonrise preserves that exception through the
+terrain, entity, and POI load tasks; the chunk scheduler raises a fatal chunk
+system error instead of loading an empty chunk. This intentionally favors
+preserving region data over keeping the server online during a remote-store
+failure.
 
 Install the Python package on the Paper host so the command is available at
 `/usr/local/bin/fiesta-world-tier`. Place its configuration at
@@ -24,16 +28,17 @@ command/config paths and timeout can be overridden with these JVM properties:
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
 ```
 
-The command validates the marker's dimension, coordinates, and manifest hash,
+The command validates the marker's dimension, coordinates, state, and manifest hash,
 checks the configured world root, verifies the complete downloaded bundle,
 checks a local free-space reserve, atomically publishes all listed files, then
 removes the marker and remote object. A marker is written only after a remote
-bundle has been fully uploaded and verified. Before publishing restored files,
-the command durably changes the marker from `REMOTE_ONLY` to `RESTORING`. Paper
-retries either state even if some local files exist, so an interrupted eviction
-or multi-file restore cannot be mistaken for a complete bundle. Paper closes
-any cached region handle before invoking recovery, then opens a fresh handle
-only after full-bundle verification.
+bundle has been fully uploaded and verified. Paper recognizes `REMOTE_ONLY`,
+`EVICTING`, and `RESTORING` markers. Before publishing restored files, the
+command durably changes the marker to `RESTORING`. Paper retries any recognized
+state even if some local files exist, so an interrupted eviction or multi-file
+restore cannot be mistaken for a complete bundle. Paper closes any cached
+region handle before invoking recovery, then opens a fresh handle only after
+full-bundle verification.
 
 ## Scope and current safety boundary
 
@@ -48,5 +53,7 @@ installed on Fiesta or exercised against a disposable Paper world yet.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
-reserve check fails, the operation returns an I/O error and leaves the world
-files untouched. Keep a separate complete backup before any production rollout.
+reserve check fails, the operation returns a typed I/O error and leaves the
+world files untouched. Paper/Moonrise fails the chunk task and stops the server
+with a crash report; restore the remote service and retry server startup. Keep
+a separate complete backup before any production rollout.

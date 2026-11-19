@@ -1,5 +1,6 @@
 package net.minecraft.world.level.chunk.storage;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -14,17 +15,32 @@ public final class FiestaRegionRestorerMarkerTest {
         Files.writeString(terrain, "local terrain survives");
         check(!FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0), "unmarked local region should not restore");
 
-        Files.writeString(marker, "{\"state\":\"REMOTE_ONLY\"}\n");
-        check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
-            "REMOTE_ONLY must restore even when terrain survived partial eviction");
-
-        Files.writeString(marker, "{\"state\":\"RESTORING\"}\n");
-        check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
-            "RESTORING must retry when local terrain exists");
+        for (final String state : new String[] {"REMOTE_ONLY", "EVICTING", "RESTORING"}) {
+            Files.writeString(marker, "{\"state\":\"" + state + "\"}\n");
+            check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
+                state + " must trigger recovery when local terrain exists");
+            check(state.equals(FiestaRegionRestorer.markerState(marker)),
+                state + " marker state must pass validation");
+        }
 
         Files.writeString(marker, "{invalid marker}\n");
         check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
             "invalid markers must fail closed");
+        boolean typedRestoreFailure = false;
+        try {
+            FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0);
+        } catch (final FiestaWorldTierRestoreException expected) {
+            typedRestoreFailure = true;
+        }
+        check(typedRestoreFailure, "restore failures must use the typed fail-closed exception");
+
+        final FiestaWorldTierRestoreException tierFailure = new FiestaWorldTierRestoreException(
+            "restore failure", new IOException("remote store unavailable")
+        );
+        check(FiestaWorldTierRestoreException.find(tierFailure) == tierFailure,
+            "tier restore failures must remain identifiable after wrapping");
+        check(FiestaWorldTierRestoreException.find(new RuntimeException("wrapper", tierFailure)) == tierFailure,
+            "wrapped tier restore failures must remain identifiable");
 
         Files.delete(marker);
         check(!FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0), "removed marker should allow local data");
