@@ -119,41 +119,41 @@ access age, local reserve, and Luna quota. With the default 30-day cold age,
 regions accessed during rollout will not be candidates until they have aged
 past that threshold. The scheduler is not installed on Fiesta. Its tick
 dispatch and invocation of the leased Paper API were exercised on a disposable
-Paper server with a fake CLI shim. A disposable Paper 1.21.11 server also
-restored a synthetic spawn-region bundle from Luna after `/forceload add`
-requested the marked chunk. Its hash matched, the marker cleared, and the
-remote object was consumed. An earlier separate probe requested an 8 KiB
-synthetic region through Paper's asynchronous chunk API; its callback
-completed in 23.2 seconds.
+Paper server with a fake CLI shim. Earlier asynchronous probes reported 23.2 s
+and 15.4 s, but inspection of their saved Java harness showed they passed
+`generate=true`; those timings are not valid no-generation restore measurements
+and are not used as evidence here.
 
-The latest disposable end-to-end cycle exercised the actual scheduler, leased
-offload API, Luna SFTP store, and asynchronous demand restore. With a synthetic
-8 KiB region selected as the sole cold candidate, Paper offloaded it, then
-restored it when `World.getChunkAtAsync(..., generate=false)` requested the
-chunk. The restored SHA-256 matched the source, the marker cleared, remote test
-usage returned to zero, and a tick monitor saw no gap above 500 ms. The restore
-callback took 15.4 seconds, which is still too slow for a player-facing feature
-and needs optimization. The zero-byte free-space reserve was test-only in the
-disposable configuration. All tests used isolated worlds and did not touch
-Fiesta data. They do not measure normal-region throughput. Crash recovery,
-outage recovery, concurrent player movement, and production-scale region
-transfers remain unverified. Automatic eviction stays off on Fiesta until those
-gates pass.
+The corrected disposable end-to-end cycle exercised the actual scheduler,
+leased offload API, Luna SFTP store, and asynchronous demand restore. Paper
+selected and offloaded a synthetic 8 KiB region, then restored its remote-only
+bundle when `World.getChunkAtAsync(..., generate=false)` requested a chunk in
+that region. The restored file SHA-256 matched, the marker cleared, Luna test
+usage returned to zero, and a tick monitor saw no gap above 500 ms. The
+callback took 27.379 s and returned `null`: the synthetic region file contained
+no actual chunk. This validates marker-driven file restoration, but not loading
+a real chunk or the player experience. A real-chunk fixture was attempted but
+Paper's access tracker marked the region during startup, preventing the cold
+offload precondition from being met. The zero-byte free-space reserve was
+test-only. All runs used isolated worlds and did not touch Fiesta data. Crash
+and outage recovery, concurrent player movement, normal-region throughput, and
+production-scale transfers remain unverified. Automatic eviction stays off on
+Fiesta until those gates pass.
 
 A follow-up changed small manifest reads to use stdout over the pinned SSH
 connection instead of a separate SFTP transfer. A real Luna smoke test using a
 different synthetic 8 KiB bundle measured 0.50 seconds for manifest read, 5.40
 seconds for verified fetch, and 4.43 seconds for hash-guarded deletion. The
 downloaded SHA-256 matched and the test root was removed. This measured only
-the store operations; the Paper asynchronous callback has not yet been
-remeasured after this change, so its last measured latency remains 15.4 seconds.
+the store operations.
 
 A second pass changed hash-guarded remote deletion from SFTP to a single SSH
 command while holding the remote writer lock. A new real Luna smoke test
 measured 0.50 seconds for manifest read, 5.45 seconds for verified fetch, and
 2.02 seconds for deletion; the SHA-256 matched and the isolated remote root was
-removed. Those store stages total 7.97 seconds, but the full Paper callback has
-not been rerun after either optimization.
+removed. Those store stages total 7.97 seconds. The post-optimization Paper
+callback took 27.379 seconds, returned no chunk object, and remains too slow;
+the gap between store-stage and Paper callback timings is unexplained.
 
 The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the

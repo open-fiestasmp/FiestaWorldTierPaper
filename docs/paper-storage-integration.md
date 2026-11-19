@@ -85,41 +85,36 @@ set. It checks that the main server is empty before planning and again before
 asking Paper for the exclusive region lease. Paper patch `0039` refuses offload
 after an access-tracking failure. On a disposable Paper server, the scheduler's
 tick dispatch and invocation of the leased API were exercised using a fake CLI
-shim. After the batched transport change, a disposable Paper 1.21.11 server
-restored a synthetic spawn-region bundle from Luna after `/forceload add`
-requested the marked chunk. The restored region SHA-256 matched the original,
-the durable marker cleared, and the remote test object was consumed. An earlier
-separate post-change probe requested an 8 KiB synthetic region through
-`World.getChunkAtAsync`; its callback completed in 23.2 seconds.
+shim. A corrected disposable
+Paper 1.21.11 cycle then used the actual scheduler, Luna SFTP store, and
+`World.getChunkAtAsync(..., generate=false)` with a synthetic 8 KiB region.
+Paper offloaded the remote-only bundle and restored it on demand. The file
+SHA-256 matched, the marker cleared, Luna test usage returned to zero, and a
+tick monitor saw no gap above 500 ms. The callback took 27.379 seconds and
+returned `null` because the synthetic region file had no actual chunk. This
+validates marker-driven file restoration, not loading a real chunk or
+player-facing behavior.
 
-In the latest disposable end-to-end cycle, the actual scheduler selected a
-synthetic 8 KiB region as the sole cold candidate, leased and offloaded it to
-Luna, and Paper's `World.getChunkAtAsync(..., generate=false)` demand restored
-it. The restored file SHA-256 matched the source, the marker cleared, Luna test
-usage returned to zero, and a tick monitor saw no gap above 500 ms. The restore
-callback took 15.4 seconds, which is still too slow for player-facing use and
-needs optimization. The zero-byte local free-space reserve was configured only
-for the disposable test. All runs used unique temporary objects and isolated
-worlds, and did not touch Fiesta data. These checks validate the basic cycle;
-they do not establish normal-region throughput. Crash and outage recovery,
-concurrent player movement, and production-scale transfers remain untested. The
-scheduler is not installed on Fiesta. Do not enable offloading on a live world
-until those remaining gates pass on disposable copies.
+Earlier callback figures of 23.2 and 15.4 seconds came from a saved harness
+that passed `generate=true`, despite earlier notes saying otherwise; they are
+not valid no-generation restore measurements. A real-chunk fixture was
+attempted, but Paper's access tracker marked its region during startup, so it
+could not meet the cold-offload precondition. A valid real-chunk restore test
+is still needed. The zero-byte local free-space reserve was used only in the
+disposable test; all runs were isolated and did not touch Fiesta data. The
+scheduler is not installed on Fiesta.
 
-A follow-up changed small manifest reads to use stdout over the pinned SSH
-connection instead of a separate SFTP transfer. A real Luna store smoke test
-with a different synthetic 8 KiB bundle measured 0.50 seconds for manifest
-read, 5.40 seconds for verified fetch, and 4.43 seconds for hash-guarded
-deletion. The fetched SHA-256 matched and the unique remote test root was
-removed. This does not remeasure the Paper asynchronous callback; its last
-end-to-end result remains 15.4 seconds.
-
-A second pass changed hash-guarded deletion from SFTP to one SSH command while
-holding the remote writer lock. A new isolated Luna smoke test measured 0.50
-seconds for manifest read, 5.45 seconds for verified fetch, and 2.02 seconds
-for deletion. The SHA-256 matched and the test root was removed. These store
-stages total 7.97 seconds; Paper's end-to-end callback has not yet been
-remeasured after the transport optimizations.
+A Luna store smoke test changed small manifest reads to stdout over the pinned
+SSH connection. It measured 0.50 seconds for manifest read, 5.40 seconds for
+verified fetch, and 4.43 seconds for hash-guarded deletion. A second pass moved
+hash-guarded deletion to one SSH command under the remote writer lock and
+measured 0.50 seconds for manifest read, 5.45 seconds for verified fetch, and
+2.02 seconds for deletion. The fetched SHA-256 matched and each isolated test
+root was removed. These store stages total 7.97 seconds. The post-optimization
+Paper callback took 27.379 seconds; the gap is unexplained and needs
+investigation. Crash/outage recovery, concurrent player movement, real-chunk
+restore latency, and production-scale transfers remain unverified. Do not
+enable offloading on a live world until those gates pass on disposable copies.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
