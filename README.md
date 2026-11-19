@@ -5,7 +5,7 @@ Paper treats missing local data as empty terrain and for coordinating an
 explicit, leased offload call. This project is GPL-3.0
 because it changes Paper's GPL-licensed storage code.
 
-The implementation consists of six ordered Paper patches and five small Java
+The implementation consists of seven ordered Paper patches and six small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
@@ -27,6 +27,9 @@ helpers:
   the bundle.
 - `paper-server/patches/features/0039-...patch` refuses offload when region
   access tracking has failed for that dimension.
+- `paper-server/patches/features/0040-...patch` calls an optional idle-only
+  budget scheduler from active and empty-server ticks. It stays disabled unless
+  both a local byte target and scheduler interval are explicitly configured.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
@@ -38,20 +41,23 @@ helpers:
 - `paper-server/src/main/java/.../FiestaRegionAccessTracker.java` records
   synced, region-level read/write timestamps and fails closed on unknown or
   invalid history.
+- `paper-server/src/main/java/.../FiestaWorldTierScheduler.java` runs the
+  planner off-thread, asks for one oldest cold bundle at a time, and starts
+  Paper's leased offload only while the main server is empty.
 
 ## Build against Paper 1.21.11
 
 Use a clean Paper 1.21.11 source checkout. Copy the feature patches into
 `paper-server/patches/features/` after the existing feature patches, copy all
-five Java helpers to their matching `paper-server/src/main/java/` package paths, then
-run:
+six Java helpers to their matching `paper-server/src/main/java/` package paths,
+then run:
 
 ```sh
 ./gradlew applyPatches
 ./gradlew createMojmapBundlerJar
 ```
 
-All six patches are ordered and version-specific. Rebase and rebuild them
+All seven patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
@@ -95,16 +101,31 @@ eviction on a worker. The Python command verifies that Paper still holds the
 OS lock before it will offload. Java/Python lock interoperability was checked
 on Linux.
 
-There is no automatic cold-region selector or scheduler, and no production
-caller currently invokes this API. The companion CLI can seed an initial
-catalog, list age-eligible regions, and dry-run a local world-data budget plan.
-Paper refuses offload if its access tracker is unhealthy; the CLI rechecks the
-persisted access age while Paper's lease is held. The planner reads an unlocked
-advisory Luna usage snapshot and caps its estimate by reported headroom; each
-actual upload still enforces quota under the remote writer lock. It does not
-call the offload API or schedule offloads.
-Automatic eviction remains disabled; do not invoke it on Fiesta until budget policy,
-restart/crash recovery, and concurrency behavior pass disposable-server tests.
+The optional idle scheduler is implemented but disabled unless both
+`fiesta.worldTier.schedulerTargetBytes` and
+`fiesta.worldTier.schedulerIntervalSeconds` are set. For example, a 60 GB local
+world-data target with one planning pass per hour can be configured with:
+
+```text
+-Dfiesta.worldTier.schedulerTargetBytes=60000000000
+-Dfiesta.worldTier.schedulerIntervalSeconds=3600
+-Dfiesta.worldTier.schedulerPlanTimeoutSeconds=120
+```
+
+Each pass asks the companion CLI for at most one oldest eligible bundle, then
+rechecks that the main server is empty before invoking Paper's exclusive lease.
+The lease still rejects loaded or ticketed regions, and the CLI still checks
+access age, local reserve, and Luna quota. With the default 30-day cold age,
+regions accessed during rollout will not be candidates until they have aged
+past that threshold. The scheduler is not installed on Fiesta. Its tick
+dispatch and invocation of the leased Paper API were exercised on a disposable
+Paper server with a fake CLI shim; real remote transfer, restore, and crash
+recovery still need end-to-end tests. Automatic eviction remains off on Fiesta
+until those gates pass.
+
+The companion CLI can seed an initial catalog, list age-eligible regions, and
+dry-run a local world-data budget plan. No production caller invokes the
+scheduler on Fiesta.
 
 The patches build as part of the isolated Paper 1.21.11 checkout. A restore
 failure becomes a fatal chunk-system error and stops the server rather than

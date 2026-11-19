@@ -1,0 +1,34 @@
+From e882709fab92deb9cacc8ee0ae7c591c2b010be8 Mon Sep 17 00:00:00 2001
+From: FiestaSMP Engineering <noreply@github.com>
+Subject: [PATCH] Add opt-in idle world-tier budget scheduler
+
+The scheduler stays disabled unless both its interval and local byte target
+are explicitly configured. It plans one region at a time and requires the
+main server to be empty before planning and again before Paper's lease.
+
+---
+ net/minecraft/server/MinecraftServer.java | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index ca2caace6aab0dfcb0ab7a0fd28e66555c62fdc5..dcfb4800345f7b23b9328ebe3baa43440fe7e3c8 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1596,6 +1596,7 @@
+                     // process unloads
+                     level.getChunkSource().tick(() -> true, false);
+                 }
++                net.minecraft.server.FiestaWorldTierScheduler.tick(this);
+                 // Paper end - avoid issues with certain tasks not processing during sleep
+                 this.server.spark.executeMainThreadTasks(); // Paper - spark
+                 this.tickConnection();
+@@ -1609,6 +1610,7 @@
+         this.tickCount++;
+         this.tickRateManager.tick();
+         this.tickChildren(hasTimeLeft);
++        net.minecraft.server.FiestaWorldTierScheduler.tick(this);
+         if (nanos - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) {
+             this.lastServerStatus = nanos;
+             this.status = this.buildServerStatus();
+-- 
+2.53.0

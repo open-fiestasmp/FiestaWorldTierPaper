@@ -79,12 +79,16 @@ This hook covers demand restore and prevents missing remote data from being
 treated as new terrain. The Paper patch includes an explicit leased offload
 API and the Python `offload` command, which requires Paper's held OS file lock.
 Paper tracking failures disable offload for that dimension.
-There is no automatic cold-region selector or scheduler, and no production
-caller invokes the API. Do not enable offloading on a live world until the
-local-storage budget policy, restart/crash recovery, and concurrency behavior
-pass disposable-server tests. Candidate listing does not enforce an Oracle
-world-data budget. The patch has not been installed on Fiesta or exercised
-against a disposable Paper world.
+Paper patch `0040` adds an opt-in idle-only scheduler that plans one bundle per
+pass; it is disabled unless its target and interval system properties are both
+set. It checks that the main server is empty before planning and again before
+asking Paper for the exclusive region lease. Paper patch `0039` refuses offload
+after an access-tracking failure. On a disposable Paper server, the scheduler's
+tick dispatch and invocation of the leased API were exercised using a fake CLI
+shim. Real remote transfer, demand restore, and crash recovery have not been
+tested end-to-end. The scheduler is not installed on Fiesta. Do not enable
+offloading on a live world until the local-storage budget policy, restart/crash
+recovery, and concurrency behavior pass disposable-server tests.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk
