@@ -24,6 +24,10 @@ command. The command refuses to proceed unless it can verify Paper's live
 cross-process file lock. This Java/Python lock handoff has been checked on
 Linux.
 
+Patch `0039` refuses offload when Paper's region access tracker has failed for
+that dimension. This keeps an unreadable or unwritable access catalog from
+being treated as proof that a region is cold.
+
 Patch `0037` adds a fair per-region lease around Moonrise asynchronous chunk
 reads and writes and Paper's synchronous region read, scan, and write paths.
 `MoonriseRegionFileIO.acquireTieringLease(world, regionX, regionZ)` waits for
@@ -45,7 +49,17 @@ command/config paths and timeout can be overridden with these JVM properties:
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
 -Dfiesta.worldTier.offloadTimeoutSeconds=3600
+-Dfiesta.worldTier.accessWriteIntervalMillis=60000
 ```
+
+Paper records region-level shared-I/O use in an atomically replaced timestamp
+under `<dimension-root>/.world-tier/access/`. It syncs a first touch and
+throttles repeated writes to the configured interval. Missing or invalid
+history is treated as hot. The companion `catalog` command seeds existing
+local regions conservatively, and `candidates` provides a dry-run list using
+the configured age and `protected_regions`. Candidate listing is not a local
+budget controller; the offload command applies the same configured age check
+again while the Paper lock is held.
 
 The command validates the marker's dimension, coordinates, state, and manifest hash,
 checks the configured world root, verifies the complete downloaded bundle,
@@ -64,11 +78,13 @@ full-bundle verification.
 This hook covers demand restore and prevents missing remote data from being
 treated as new terrain. The Paper patch includes an explicit leased offload
 API and the Python `offload` command, which requires Paper's held OS file lock.
+Paper tracking failures disable offload for that dimension.
 There is no automatic cold-region selector or scheduler, and no production
 caller invokes the API. Do not enable offloading on a live world until the
-access-age policy, restart/crash recovery, and concurrency behavior pass
-disposable-server tests. The patch has not been installed on Fiesta or
-exercised against a disposable Paper world.
+local-storage budget policy, restart/crash recovery, and concurrency behavior
+pass disposable-server tests. Candidate listing does not enforce an Oracle
+world-data budget. The patch has not been installed on Fiesta or exercised
+against a disposable Paper world.
 
 The integration is intentionally fail-closed. If the marker, command,
 configuration, SSH host key, remote bundle, checksum, quota, or local disk

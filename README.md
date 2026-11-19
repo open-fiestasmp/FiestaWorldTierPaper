@@ -5,7 +5,7 @@ Paper treats missing local data as empty terrain and for coordinating an
 explicit, leased offload call. This project is GPL-3.0
 because it changes Paper's GPL-licensed storage code.
 
-The implementation consists of five ordered Paper patches and four small Java
+The implementation consists of six ordered Paper patches and five small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
@@ -25,6 +25,8 @@ helpers:
   offload call on a dedicated worker. It holds Paper's exclusive in-process
   lease and a Linux process lock while the companion command uploads and evicts
   the bundle.
+- `paper-server/patches/features/0039-...patch` refuses offload when region
+  access tracking has failed for that dimension.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
@@ -33,12 +35,15 @@ helpers:
   fair asynchronous lease queue and the cross-process lease used by the child.
 - `paper-server/src/main/java/.../FiestaRegionOffloader.java` invokes and
   validates the companion offload command.
+- `paper-server/src/main/java/.../FiestaRegionAccessTracker.java` records
+  synced, region-level read/write timestamps and fails closed on unknown or
+  invalid history.
 
 ## Build against Paper 1.21.11
 
 Use a clean Paper 1.21.11 source checkout. Copy the feature patches into
 `paper-server/patches/features/` after the existing feature patches, copy all
-four Java helpers to their matching `paper-server/src/main/java/` package paths, then
+five Java helpers to their matching `paper-server/src/main/java/` package paths, then
 run:
 
 ```sh
@@ -46,7 +51,7 @@ run:
 ./gradlew createMojmapBundlerJar
 ```
 
-All five patches are ordered and version-specific. Rebase and rebuild them
+All six patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
@@ -61,6 +66,7 @@ needed):
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
 -Dfiesta.worldTier.offloadTimeoutSeconds=3600
+-Dfiesta.worldTier.accessWriteIntervalMillis=60000
 ```
 
 The config must be a regular file with mode `0600`; the SSH identity and pinned
@@ -90,8 +96,12 @@ OS lock before it will offload. Java/Python lock interoperability was checked
 on Linux.
 
 There is no automatic cold-region selector or scheduler, and no production
-caller currently invokes this API. Automatic eviction remains disabled; do not
-invoke it on Fiesta until access-age selection, restart/crash recovery, and
+caller currently invokes this API. The companion CLI can seed an initial
+catalog and list age-eligible regions. Paper refuses offload if its access
+tracker is unhealthy; the CLI rechecks the persisted access age while Paper's
+lease is held. The system does not yet choose regions to meet an Oracle storage
+budget or schedule offloads. Automatic eviction remains disabled; do not
+invoke it on Fiesta until budget policy, restart/crash recovery, and
 concurrency behavior pass disposable-server tests.
 
 The patches build as part of the isolated Paper 1.21.11 checkout. A restore
@@ -109,7 +119,7 @@ file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
 exceptions. The isolated Paper 1.21.11 checkout compiled successfully with
-`:paper-server:compileJava`; the standalone Java fixtures pass, and all 30
+`:paper-server:compileJava`; the standalone Java fixtures pass, and all 36
 companion Python unit tests pass. A separate Linux fixture confirmed that the
 Java process lock is observed by Python's `fcntl.lockf` check.
 It has not been installed on Fiesta, tested against Luna, or exercised in a

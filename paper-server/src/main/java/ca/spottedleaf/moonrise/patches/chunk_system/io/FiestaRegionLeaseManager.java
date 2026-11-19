@@ -31,6 +31,7 @@ public final class FiestaRegionLeaseManager {
     private FiestaRegionLeaseManager() {}
 
     public static CompletableFuture<Lease> acquireShared(final Path dimensionRoot, final int regionX, final int regionZ) {
+        FiestaRegionAccessTracker.recordAccess(dimensionRoot, regionX, regionZ);
         return acquire(dimensionRoot, regionX, regionZ, false);
     }
 

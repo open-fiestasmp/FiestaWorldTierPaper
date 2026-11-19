@@ -11,8 +11,8 @@ import java.util.concurrent.CompletableFuture;
 public final class FiestaRegionLeaseManagerTest {
 
     public static void main(final String[] args) throws Exception {
-        final Path dimension = Path.of("/tmp/fiesta-world");
-        final Path otherDimension = Path.of("/tmp/fiesta-nether");
+        final Path dimension = Files.createTempDirectory("fiesta-world-lease-");
+        final Path otherDimension = Files.createTempDirectory("fiesta-nether-lease-");
 
         final Lease firstReader = FiestaRegionLeaseManager.acquireShared(dimension, -1, 2).join();
         final Lease secondReader = FiestaRegionLeaseManager.acquireShared(dimension, -1, 2).join();
@@ -66,6 +66,8 @@ public final class FiestaRegionLeaseManagerTest {
         Files.delete(processLockPath.getParent());
         Files.delete(processLockPath.getParent().getParent());
         Files.delete(processLeaseRoot);
+        deleteTree(dimension);
+        deleteTree(otherDimension);
 
         System.out.println("Fiesta region lease manager checks passed");
     }
@@ -73,6 +75,14 @@ public final class FiestaRegionLeaseManagerTest {
     private static void require(final boolean condition, final String message) {
         if (!condition) {
             throw new AssertionError(message);
+        }
+    }
+
+    private static void deleteTree(final Path root) throws Exception {
+        try (final var entries = Files.walk(root)) {
+            for (final Path entry : entries.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(entry);
+            }
         }
     }
 }
