@@ -1,3 +1,9 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FiestaSMP Engineering <noreply@github.com>
+Subject: [PATCH] Retry transient world-tier restore failures
+
+---
+
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java

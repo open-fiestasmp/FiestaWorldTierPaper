@@ -67,6 +67,10 @@ GIT_COMMITTER_NAME='FiestaSMP Engineering' GIT_COMMITTER_EMAIL='noreply@github.c
 ./gradlew createMojmapBundlerJar
 ```
 
+On 2026-11-24, a clean checkout at the pinned commit passed both Gradle tasks;
+the generated server and bundler jars contained the restorer, scheduler, and
+offloader classes. This was an isolated build and was not deployed to Fiesta.
+
 All eight patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
