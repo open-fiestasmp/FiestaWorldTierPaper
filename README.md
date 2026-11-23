@@ -227,9 +227,9 @@ wrapped exceptions. An isolated checkout at the pinned Fiesta base built
 `createMojmapBundlerJar` with the asynchronous retry and retry-log changes; the
 compiled server JAR contains the restore, lease, offload, access-tracker, and
 scheduler classes.
-The standalone Java fixtures pass, all 76 companion Python unit tests pass, and a separate
-Linux fixture confirmed that Python observes the Java process lock with
-`fcntl.lockf`.
+The standalone Java fixtures pass, all 77 companion Python unit tests pass, and
+a separate Linux fixture confirmed that Python observes the Java process lock
+with `fcntl.lockf`.
 
 The compiled bundle also started in a disposable localhost-only Paper instance,
 created its three dimensions, reached `Done`, and shut down cleanly. This checks
@@ -246,8 +246,13 @@ Luna. The unique test root was removed and remote usage returned to zero. With
 SSH multiplexing enabled, the measured phases were 26.6 seconds to publish,
 3.1 seconds to read the manifest, 9.4 seconds to fetch the complete bundle,
 and 9.0 seconds to delete it. Read plus fetch used two SFTP batches. One earlier
-multiplexed store attempt timed out, though a subsequent complete run passed;
-mid-transfer interruption and retry behavior still need more testing.
+multiplexed store attempt timed out, though a subsequent complete run passed.
+The companion Python suite now checks cleanup after a partial upload and a
+single retry after a transient fetch interruption. A disposable live Luna SFTP
+run interrupted the bundle after its first member; staging was empty, no
+object was published, the writer lock was released, and the local source was
+unchanged. A mid-file disconnect and recovery from a forced process crash
+remain untested.
 
 This has not been installed on Fiesta or tested with a live world. No production
 world data was transferred. An earlier synchronous outage probe stopped its
