@@ -36,7 +36,8 @@ helpers:
 - `paper-server/patches/features/0041-...patch` leaves tier restore failures
   to the retry handler, which reports them at a bounded warning rate.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
-  companion `fiesta-world-tier restore` command when needed.
+  companion `fiesta-world-tier restore` command when needed and caps concurrent
+  retries for a marked region with a jittered cooldown.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
   identifies restore failures through Paper and Moonrise exception wrappers.
 - `paper-server/src/main/java/.../FiestaRegionLeaseManager.java` provides the
@@ -231,7 +232,9 @@ local terrain region, and the tier-failure type remains detectable through
 wrapped exceptions. An isolated checkout at the pinned Fiesta base built
 `createMojmapBundlerJar` with the asynchronous retry and retry-log changes; the
 compiled server JAR contains the restore, lease, offload, access-tracker, and
-scheduler classes.
+scheduler classes. A 12-thread marker fixture also confirmed that simultaneous
+requests for one marked region run a single restore helper; it tests the
+restorer lock, not Paper's full chunk scheduler.
 The standalone Java fixtures pass, all 77 companion Python unit tests pass, and
 a separate Linux fixture confirmed that Python observes the Java process lock
 with `fcntl.lockf`.
@@ -268,10 +271,12 @@ This has not been installed on Fiesta or tested with a live world. No production
 world data was transferred. Disposable recovery tests check temporary and
 nonzero restore failures, preservation of the remote marker while the local
 region is absent, continued loading of unrelated saved chunks, and restoration
-of the saved chunk after recovery. The nonzero-exit outage probe kept Paper
-alive, loaded a nearby saved chunk, and restored the requested region after
-three fixture calls over 6.6 seconds. It does not reproduce a real Luna outage
-or measure player-facing latency. Production eviction remains disabled.
+of the saved chunk after recovery. A forced process-stop probe confirmed that a
+marked region remained unavailable across restart and restored after the
+fixture recovered. The nonzero-exit outage probe kept Paper alive, loaded a
+nearby saved chunk, and restored the requested region after three fixture
+calls over 6.6 seconds. These tests do not reproduce a real Luna outage or
+measure player-facing latency. Production eviction remains disabled.
 
 ## License
 

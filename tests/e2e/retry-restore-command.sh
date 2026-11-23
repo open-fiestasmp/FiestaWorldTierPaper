@@ -22,7 +22,7 @@ with attempt_log.open("a", encoding="utf-8") as stream:
     stream.write("attempt\n")
 
 if not allow_file.is_file():
-    raise SystemExit(1)
+    raise SystemExit(int(config.get("failure_exit_code", 1)))
 
 shutil.copyfile(backup_region, target_region)
 marker.unlink()

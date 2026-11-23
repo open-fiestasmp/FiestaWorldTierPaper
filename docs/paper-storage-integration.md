@@ -241,3 +241,20 @@ cooldown limited the helper to three calls during the five-second injected
 outage. After the fixture was allowed to restore the saved data, Paper loaded
 the gold block and cleared the marker in 6.6 seconds. This checks a local
 fixture, not Luna failure handling or player-facing latency.
+
+A second 2026-11-24 run returned exit code `75` during the same five-second
+injected failure window. The helper ran four times; Paper completed the chunk
+future in 12.25 seconds and restored the saved block. The delay includes the
+injected outage and is not a player-route latency measurement.
+
+A 2026-11-24 disposable crash/restart test force-stopped Paper while a marked
+region had no local terrain file and the restore fixture returned an error.
+The marker and absent terrain file survived the process stop. After restart,
+Paper retried the fixture, loaded an unrelated saved chunk, then restored the
+saved gold-block chunk when the fixture recovered. This confirms marker-based
+recovery across a process crash on local disposable data; it does not test a
+crash during transfer or a production restart. The repeatable probe is
+[`check-restore-crash-restart.sh`](../tests/e2e/check-restore-crash-restart.sh).
+In its 2026-11-24 exit-code-`1` run, two restore calls occurred before the
+forced stop and six total before recovery. An exit-code-`75` run made three
+calls before the forced stop and seven total before recovery.

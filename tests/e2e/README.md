@@ -26,6 +26,11 @@ checksum comparison. The Python suite separately checks bundle checksums and
 publication rules. This test uses an injected temporary failure; it does not
 simulate Luna becoming unreachable or measure player-facing latency.
 
+The 2026-11-24 repeat used the per-region cooldown and exit code `75` for the
+five-second injected failure. The fixture ran four times; the chunk future
+completed in 12.25 seconds, including the injected delay. That is a disposable
+Paper restore-path timing, not a player's end-to-end cold-load measurement.
+
 A separate probe verifies recovery from nonzero restore failures. Its fixture
 command first exits with code `1`, keeping the region unavailable. Paper keeps
 the chunk pending and applies a per-region cooldown to limit restore-command
@@ -36,6 +41,21 @@ to restore the saved region, the gold block loaded and the marker cleared in
 6.6 seconds. The harness fails if more than six restore commands run during
 that outage. Run it with [`check-restore-retry.sh`](check-restore-retry.sh).
 This checks a local test fixture, not a Luna outage or player-facing latency.
+
+[`check-restore-crash-restart.sh`](check-restore-crash-restart.sh) repeats the
+same marked-region setup, force-stops only its disposable Paper process while
+the restore is pending, and starts that world again. It checks that the marker
+and absent region survive the process crash, the new process retries the
+restore, unrelated local chunks still load, and the saved gold block appears
+after the fixture is allowed to recover. Its restore config, command, world,
+logs, and marker paths must all stay under `/tmp`.
+With exit code `1`, two helper calls occurred before the crash and six total
+before recovery. With exit code `75`, three occurred before the crash and seven
+total before recovery.
+
+The restore fixture defaults to exit code `1`. Set `failure_exit_code` to `75`
+in its disposable JSON config to cover the command's temporary-failure status
+as a separate case.
 
 Earlier disposable cold restores of the same 638,976-byte region took 9.381 and
 7.528 seconds. Those timings were single-region reads, not player-latency
@@ -102,10 +122,19 @@ probe chunk, save a copy of the target region under `/tmp`, then remove the
 target region and create its `REMOTE_ONLY` marker. Copy
 [`retry-restore-command.sh`](retry-restore-command.sh) under `/tmp` and set the
 required environment variables listed by `check-restore-retry.sh`. The harness
-keeps the fixture command returning `1` until the local probe chunk has loaded;
-it then permits the command to restore the saved region. It expects multiple
-nonzero attempts, the marker and absent region to remain intact during failure,
-and the saved gold block to load after recovery. Keep the server, config,
+keeps the fixture command returning the configured nonzero code (default `1`)
+until the local probe chunk has loaded; it then permits the command to restore
+the saved region. Set `failure_exit_code` to `75` to check the
+temporary-failure status. The harness expects multiple nonzero attempts, the
+marker and absent region to remain intact during failure, and the saved gold
+block to load after recovery. Keep the server, config,
 backup, scripts, and result files under `/tmp`. Never use Fiesta's live world
 or mark a production region remote-only. Keep private config, keys, host-key
 files, and test-world data out of source control.
+
+For crash/restart recovery, use the same seeded target and local probe chunks
+with a fresh attempt log and an absent allow file, then run
+[`check-restore-crash-restart.sh`](check-restore-crash-restart.sh). It requires
+two unused readiness paths and three unused log paths under `/tmp`. The test
+intentionally kills the Paper process it starts; never point it at a live
+server.
