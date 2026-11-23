@@ -53,6 +53,11 @@ With exit code `1`, two helper calls occurred before the crash and six total
 before recovery. With exit code `75`, three occurred before the crash and seven
 total before recovery.
 
+The standalone marker fixture also sets a one-second timeout for a restore
+helper with a child process that writes a liveness file. It verifies that the
+child stops, the marker remains, and no terrain region is published. This is a
+local process-cleanup check, not a network-outage test.
+
 The restore fixture defaults to exit code `1`. Set `failure_exit_code` to `75`
 in its disposable JSON config to cover the command's temporary-failure status
 as a separate case.

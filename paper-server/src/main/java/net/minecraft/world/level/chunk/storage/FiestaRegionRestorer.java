@@ -145,12 +145,11 @@ final class FiestaRegionRestorer {
 
                 try {
                     if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                        process.destroyForcibly();
-                        process.waitFor(Math.min(timeoutSeconds, 10L), TimeUnit.SECONDS);
+                        destroyProcessTree(process);
                         throw new IOException("Fiesta world-tier restore timed out after " + timeoutSeconds + " seconds");
                     }
                 } catch (final InterruptedException ex) {
-                    process.destroyForcibly();
+                    destroyProcessTree(process);
                     Thread.currentThread().interrupt();
                     throw new IOException("Interrupted while restoring a Fiesta world-tier region", ex);
                 }
@@ -181,6 +180,16 @@ final class FiestaRegionRestorer {
                 retry.recordFailure();
                 throw new FiestaWorldTierRestoreException("Fiesta world-tier region recovery failed", ex, true);
             }
+        }
+    }
+
+    private static void destroyProcessTree(final Process process) {
+        process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+        try {
+            process.waitFor(10L, TimeUnit.SECONDS);
+        } catch (final InterruptedException ex) {
+            Thread.currentThread().interrupt();
         }
     }
 

@@ -258,3 +258,8 @@ crash during transfer or a production restart. The repeatable probe is
 In its 2026-11-24 exit-code-`1` run, two restore calls occurred before the
 forced stop and six total before recovery. An exit-code-`75` run made three
 calls before the forced stop and seven total before recovery.
+
+The marker fixture also forces a one-second restore timeout while the helper
+has a child process writing to a liveness file. It checks the helper's child
+stops, the remote marker remains, and no terrain file is published. This
+verifies local process cleanup; it does not simulate a network outage.

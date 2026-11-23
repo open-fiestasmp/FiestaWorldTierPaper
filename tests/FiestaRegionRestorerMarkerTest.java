@@ -83,6 +83,7 @@ public final class FiestaRegionRestorerMarkerTest {
             }
         }
         checkConcurrentRestore();
+        checkRestoreTimeoutKillsChildren();
         System.out.println("FiestaRegionRestorer marker fixture passed");
     }
 
@@ -154,6 +155,69 @@ public final class FiestaRegionRestorerMarkerTest {
             executor.shutdownNow();
             System.clearProperty("fiesta.worldTier.command");
             System.clearProperty("fiesta.worldTier.config");
+            try (var paths = Files.walk(dimension)) {
+                for (final Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
+        }
+    }
+
+    private static void checkRestoreTimeoutKillsChildren() throws Exception {
+        final Path dimension = Files.createTempDirectory("fiesta-region-restore-timeout-");
+        final Path regionDirectory = Files.createDirectories(dimension.resolve("region"));
+        final Path markerDirectory = Files.createDirectories(dimension.resolve(".world-tier/remote"));
+        final Path marker = markerDirectory.resolve("r.0.0.json");
+        final Path config = Files.writeString(dimension.resolve("restore-config.json"), "{}\n");
+        final Path command = dimension.resolve("restore-command.sh");
+        final Path childScript = dimension.resolve("restore-child.py");
+        final Path childPid = dimension.resolve("restore-child.pid");
+        final Path ticks = dimension.resolve("restore-child-ticks.log");
+        Files.writeString(childScript,
+            "import sys, time\n"
+                + "while True:\n"
+                + "    with open(sys.argv[1], 'a', encoding='utf-8') as output:\n"
+                + "        output.write('tick\\n')\n"
+                + "    time.sleep(0.05)\n");
+        final String script = "#!/bin/sh\n"
+            + "set -eu\n"
+            + "python3 '" + childScript + "' '" + ticks + "' &\n"
+            + "child=$!\n"
+            + "printf '%s\\n' \"$child\" > '" + childPid + "'\n"
+            + "wait \"$child\"\n";
+        Files.writeString(command, script);
+        Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwx------"));
+        Files.writeString(marker, "{\"state\":\"REMOTE_ONLY\"}\n");
+        System.setProperty("fiesta.worldTier.command", command.toString());
+        System.setProperty("fiesta.worldTier.config", config.toString());
+        System.setProperty("fiesta.worldTier.restoreTimeoutSeconds", "1");
+
+        try {
+            boolean failed = false;
+            try {
+                FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0);
+            } catch (final IOException expected) {
+                failed = true;
+            }
+            check(failed, "the restore command must fail after its timeout");
+            check(Files.isRegularFile(childPid), "the restore fixture child did not start");
+            check(Files.isRegularFile(ticks), "the restore fixture child did not write its liveness log");
+            Thread.sleep(300L);
+            final int stableCount = Files.readAllLines(ticks).size();
+            Thread.sleep(300L);
+            check(Files.readAllLines(ticks).size() == stableCount,
+                "the restore child continued running after its parent timed out");
+            check(Files.isRegularFile(marker), "the marker must remain after a timed-out restore");
+            check(!Files.exists(regionDirectory.resolve("r.0.0.mca")),
+                "a timed-out restore must not publish a terrain region");
+        } finally {
+            System.clearProperty("fiesta.worldTier.command");
+            System.clearProperty("fiesta.worldTier.config");
+            System.clearProperty("fiesta.worldTier.restoreTimeoutSeconds");
+            if (Files.isRegularFile(childPid)) {
+                final long pid = Long.parseLong(Files.readString(childPid).trim());
+                ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+            }
             try (var paths = Files.walk(dimension)) {
                 for (final Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
                     Files.deleteIfExists(path);

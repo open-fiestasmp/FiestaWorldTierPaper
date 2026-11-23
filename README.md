@@ -37,7 +37,8 @@ helpers:
   to the retry handler, which reports them at a bounded warning rate.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed and caps concurrent
-  retries for a marked region with a jittered cooldown.
+  retries for a marked region with a jittered cooldown. On timeout, it also
+  stops child transfer processes before returning the failure.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
   identifies restore failures through Paper and Moonrise exception wrappers.
 - `paper-server/src/main/java/.../FiestaRegionLeaseManager.java` provides the
@@ -234,7 +235,9 @@ wrapped exceptions. An isolated checkout at the pinned Fiesta base built
 compiled server JAR contains the restore, lease, offload, access-tracker, and
 scheduler classes. A 12-thread marker fixture also confirmed that simultaneous
 requests for one marked region run a single restore helper; it tests the
-restorer lock, not Paper's full chunk scheduler.
+restorer lock, not Paper's full chunk scheduler. A timeout fixture also checks
+that child processes stop while the remote marker and missing local region stay
+intact.
 The standalone Java fixtures pass, all 77 companion Python unit tests pass, and
 a separate Linux fixture confirmed that Python observes the Java process lock
 with `fcntl.lockf`.
