@@ -251,8 +251,13 @@ The companion Python suite now checks cleanup after a partial upload and a
 single retry after a transient fetch interruption. A disposable live Luna SFTP
 run interrupted the bundle after its first member; staging was empty, no
 object was published, the writer lock was released, and the local source was
-unchanged. A mid-file disconnect and recovery from a forced process crash
-remain untested.
+unchanged. A second disposable run forcibly exited the publisher after one
+member was staged. The incomplete stage and writer lock remained, and no final
+object existed. After confirming the child had exited, the test removed only
+its unique stage and lock; a new publish, remote verification, and guarded
+delete then succeeded. This covers manual recovery after a client process
+exit. Automated stale-lock cleanup, a mid-file disconnect, and a Paper JVM
+crash remain untested.
 
 This has not been installed on Fiesta or tested with a live world. No production
 world data was transferred. An earlier synchronous outage probe stopped its
