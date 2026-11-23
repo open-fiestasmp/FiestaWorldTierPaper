@@ -53,6 +53,15 @@ entity, POI, and `.mcc` files before Paper loaded them. The verification callbac
 completed in 889 ms. This used a local disposable fixture, not Luna, and is not
 a player-facing latency measurement.
 
+A second run used the real OpenSSH/SFTP store with a unique, application-capped
+test namespace on Luna. The complete four-file object was 2,435,026 bytes.
+Paper's restore callback completed in 8,417 ms; all four files loaded, the
+marker cleared, and remote usage returned to zero. This is a connected Paper
+callback measurement on an empty disposable server, not a player session or
+player-perceived latency test. Keep that delay in mind: cold regions are not
+instant, and automatic production eviction stays disabled until player-facing
+latency is measured and accepted.
+
 To repeat it, run the plugin once in `seed-rich` mode with the target chunk
 coordinates. Confirm the matching `r.x.z.mca` files in `region`, `entities`,
 and `poi`, plus a `.mcc` sidecar larger than 1 MiB. Copy those four files into a
