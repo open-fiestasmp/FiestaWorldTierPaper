@@ -1,0 +1,91 @@
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/GenericDataLoadTask.java
+@@ -13,11 +13,16 @@
+ import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.chunk.storage.FiestaWorldTierRestoreException;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import java.lang.invoke.VarHandle;
+ import java.util.Map;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ThreadLocalRandom;
++import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.concurrent.atomic.AtomicLong;
+ import java.util.function.BiConsumer;
+ 
+@@ -390,6 +395,7 @@
+ 
+         private final BiConsumer<CompoundTag, Throwable> onComplete;
+         private final AtomicBoolean scheduled = new AtomicBoolean();
++        private final Object retryLock = new Object();
+ 
+         // onComplete should be caller sensitive, it may complete synchronously with schedule() - which does
+         // hold a priority lock.
+@@ -547,9 +553,11 @@
+         }
+ 
+         public void cancel() {
+-            if ((this.getAndOrPriorityVolatile(PRIORITY_EXECUTED) & PRIORITY_EXECUTED) != 0) {
+-                // cancelled or executed already
+-                return;
++            synchronized (this.retryLock) {
++                if ((this.getAndOrPriorityVolatile(PRIORITY_EXECUTED) & PRIORITY_EXECUTED) != 0) {
++                    // cancelled or executed already
++                    return;
++                }
+             }
+ 
+             // OK if we miss the field read, the task cannot complete if the cancelled bit is set and
+@@ -576,12 +584,41 @@
+                 return;
+             }
+ 
+-            final BiConsumer<CompoundTag, Throwable> consumer = (final CompoundTag data, final Throwable thr) -> {
+-                // because cancelScheduled() cannot actually stop this task from executing in every case, we need
+-                // to mark complete here to ensure we do not double complete
+-                if (LoadDataFromDiskTask.this.markExecuting()) {
+-                    LoadDataFromDiskTask.this.complete(data, thr);
+-                } // else: cancelled
++            final AtomicInteger retryAttempts = new AtomicInteger();
++            final BiConsumer<CompoundTag, Throwable> consumer = new BiConsumer<>() {
++                @Override
++                public void accept(final CompoundTag data, final Throwable thr) {
++                    final FiestaWorldTierRestoreException restoreFailure = FiestaWorldTierRestoreException.find(thr);
++                    if (restoreFailure != null && restoreFailure.isRetryable()) {
++                        final int attempt = retryAttempts.incrementAndGet();
++                        final long maximumDelay = Math.min(30_000L, 1_000L << Math.min(attempt - 1, 5));
++                        final long delay = ThreadLocalRandom.current().nextLong(maximumDelay * 3L / 4L, maximumDelay + 1L);
++                        if (attempt == 1 || attempt % 10 == 0) {
++                            LOGGER.warn("Remote restore is unavailable for {} chunk ({}, {}) {}; retrying in {}ms (attempt {})",
++                                WorldUtil.getWorldName(LoadDataFromDiskTask.this.world),
++                                LoadDataFromDiskTask.this.chunkX, LoadDataFromDiskTask.this.chunkZ,
++                                LoadDataFromDiskTask.this.type, delay, attempt);
++                        }
++                        CompletableFuture.delayedExecutor(delay, TimeUnit.MILLISECONDS).execute(() -> {
++                            synchronized (LoadDataFromDiskTask.this.retryLock) {
++                                if (LoadDataFromDiskTask.this.isMarkedExecuted()) {
++                                    return;
++                                }
++                                final Priority retryPriority = Priority.getPriority(
++                                    LoadDataFromDiskTask.this.getPriorityVolatile() & ~PRIORITY_FLAGS
++                                );
++                                LoadDataFromDiskTask.this.schedule(false, this, retryPriority);
++                            }
++                        });
++                        return;
++                    }
++
++                    // because cancelScheduled() cannot actually stop this task from executing in every case, we need
++                    // to mark complete here to ensure we do not double complete
++                    if (LoadDataFromDiskTask.this.markExecuting()) {
++                        LoadDataFromDiskTask.this.complete(data, thr);
++                    } // else: cancelled
++                }
+             };
+ 
+             final Priority initialPriority = Priority.getPriority(priority);

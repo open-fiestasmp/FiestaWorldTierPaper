@@ -2,6 +2,7 @@ package org.openfiestasmp.worldtier.test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.TimeUnit;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -28,7 +29,8 @@ public final class FiestaTierE2E extends JavaPlugin {
                 throw new IllegalArgumentException("unsupported test mode");
             }
             final long loadStartedNanos = System.nanoTime();
-            world.getChunkAtAsync(chunkX, chunkZ, mode.equals("seed")).whenComplete((chunk, failure) -> {
+            final var load = world.getChunkAtAsync(chunkX, chunkZ, mode.equals("seed"));
+            load.whenComplete((chunk, failure) -> {
                 final long chunkLoadMillis = TimeUnit.NANOSECONDS.toMillis(
                     System.nanoTime() - loadStartedNanos
                 );
@@ -36,6 +38,47 @@ public final class FiestaTierE2E extends JavaPlugin {
                     mode, world, chunkX, chunkZ, chunk, failure, chunkLoadMillis
                 ));
             });
+            if (mode.equals("outage")) {
+                final String readyPath = System.getProperty("fiesta.test.restoreAvailable");
+                if (readyPath == null || readyPath.isBlank()) {
+                    throw new IllegalArgumentException("outage mode requires fiesta.test.restoreAvailable");
+                }
+                final int localChunkX = Integer.getInteger("fiesta.test.localChunkX", 128);
+                final int localChunkZ = Integer.getInteger("fiesta.test.localChunkZ", 128);
+                final var localProbe = world.getChunkAtAsync(localChunkX, localChunkZ, false);
+                final long outageTicks = Math.max(1L,
+                    Long.getLong("fiesta.test.outageMillis", 5_000L) / 50L);
+                Bukkit.getScheduler().runTaskLater(this, () -> {
+                    if (load.isDone()) {
+                        report("FAILED:restore-did-not-wait");
+                        Bukkit.shutdown();
+                        return;
+                    }
+                    try {
+                        if (!localProbe.isDone()) {
+                            throw new IllegalStateException("local region read stalled during remote restore retry");
+                        }
+                        final org.bukkit.Chunk localChunk = localProbe.getNow(null);
+                        if (localChunk == null || world.getBlockAt(localChunkX * 16 + 1, 80,
+                                localChunkZ * 16 + 1).getType() != Material.DIAMOND_BLOCK) {
+                            throw new IllegalStateException("local region data was not available during remote restore retry");
+                        }
+                        final Path ready = Path.of(readyPath);
+                        Files.createDirectories(ready.toAbsolutePath().getParent());
+                        Files.writeString(ready, "ready\n");
+                        report("OUTAGE_SERVER_ALIVE_AND_LOCAL_CHUNK_LOADED");
+                    } catch (final Exception error) {
+                        finishFailure(mode, error);
+                        Bukkit.shutdown();
+                    }
+                }, outageTicks);
+                Bukkit.getScheduler().runTaskLater(this, () -> {
+                    if (!load.isDone()) {
+                        report("FAILED:restore-timeout");
+                        Bukkit.shutdown();
+                    }
+                }, 1_200L);
+            }
         } catch (final Throwable error) {
             finishFailure(mode, error);
         }
@@ -43,6 +86,7 @@ public final class FiestaTierE2E extends JavaPlugin {
 
     private void finishProbe(String mode, World world, int chunkX, int chunkZ,
                              org.bukkit.Chunk chunk, Throwable failure, long chunkLoadMillis) {
+        boolean deferredShutdown = false;
         try {
             if (failure != null) {
                 finishFailure(mode, failure);
@@ -57,8 +101,29 @@ public final class FiestaTierE2E extends JavaPlugin {
             switch (mode) {
                 case "seed" -> {
                     world.getBlockAt(blockX, 80, blockZ).setType(Material.GOLD_BLOCK);
-                    world.save();
-                    report("SEEDED:" + chunkLoadMillis + "ms");
+                    final int localChunkX = Integer.getInteger("fiesta.test.localChunkX", 128);
+                    final int localChunkZ = Integer.getInteger("fiesta.test.localChunkZ", 128);
+                    world.getChunkAtAsync(localChunkX, localChunkZ, true).whenComplete((localChunk, localFailure) ->
+                        Bukkit.getScheduler().runTask(this, () -> {
+                            try {
+                                if (localFailure != null) {
+                                    throw new IllegalStateException("could not seed local probe chunk", localFailure);
+                                }
+                                if (localChunk == null) {
+                                    throw new IllegalStateException("Paper completed local probe load without a chunk");
+                                }
+                                world.getBlockAt(localChunkX * 16 + 1, 80, localChunkZ * 16 + 1)
+                                    .setType(Material.DIAMOND_BLOCK);
+                                world.save();
+                                report("SEEDED:" + chunkLoadMillis + "ms");
+                            } catch (final Throwable error) {
+                                finishFailure(mode, error);
+                            } finally {
+                                Bukkit.shutdown();
+                            }
+                        }));
+                    deferredShutdown = true;
+                    return;
                 }
                 case "verify" -> {
                     if (actual != Material.GOLD_BLOCK) {
@@ -66,13 +131,20 @@ public final class FiestaTierE2E extends JavaPlugin {
                     }
                     report("RESTORED:" + chunkLoadMillis + "ms");
                 }
-                case "outage" -> report("OUTAGE_RETURNED:" + actual);
+                case "outage" -> {
+                    if (actual != Material.GOLD_BLOCK) {
+                        throw new IllegalStateException("expected GOLD_BLOCK after the outage, found " + actual);
+                    }
+                    report("OUTAGE_RECOVERED:" + chunkLoadMillis + "ms");
+                }
                 default -> throw new IllegalArgumentException("unsupported test mode");
             }
         } catch (final Throwable error) {
             finishFailure(mode, error);
         } finally {
-            Bukkit.shutdown();
+            if (!deferredShutdown) {
+                Bukkit.shutdown();
+            }
         }
     }
 
@@ -93,7 +165,7 @@ public final class FiestaTierE2E extends JavaPlugin {
         try {
             final Path path = Path.of(resultPath);
             Files.createDirectories(path.toAbsolutePath().getParent());
-            Files.writeString(path, result + "\n");
+            Files.writeString(path, result + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (final Exception error) {
             getLogger().severe("Could not write test result: " + error);
         }

@@ -1,45 +1,69 @@
 # Disposable Paper world-tier probe
 
-`FiestaTierE2E` is a tiny plugin for exercising a patched Paper server against
-a **disposable test world**. It can seed a saved block, verify it after demand
-restore (logging the asynchronous Paper chunk-load completion duration), or
-request a marked region while the configured remote store is unreachable. The
-probe uses Paper's async chunk API so the restore itself does not block the
-server's main thread. Its timing measures the chunk-load future, not a complete
-player connection or end-to-end network latency.
+`FiestaTierE2E` tests marked-region restore on a **disposable Paper server and
+world**. It seeds or checks a saved gold block and verifies that Paper can keep
+ticking while a restore attempt is temporarily unavailable.
+Chunk timings cover Paper's async chunk future, not a player connection or
+end-to-end network latency.
 
-## Current result for the Fiesta Paper 1.21.11 patch
+## Current result
 
-On a disposable world, two async cold restores of the same 638,976-byte region
-completed in 9.381 seconds and 7.528 seconds. Both preserved the seeded gold
-block and produced no watchdog warning. These are single-region storage timings,
-not a player-facing latency guarantee.
+An earlier synchronous outage test stopped Paper when the restore endpoint was
+unreachable. The current patch returns retryable transport failures to Moonrise,
+which reschedules the region read asynchronously with capped backoff.
 
-The async outage probe is currently a **failed safety test**: with only its
-test endpoint pointed at a closed localhost port, Paper's chunk I/O worker
-surfaced `FiestaWorldTierRestoreException` into Moonrise's unrecoverable chunk
-system path and shut down the disposable server before the plugin could write
-`outage-result.txt`. The remote bundle remained recoverable, and a later async
-retry restored the region. Do not run this outage probe on production, and do
-not enable automatic region eviction until this async failure path is handled
-without taking down the server. A typed restore error alone is not evidence
-that async chunk requests fail safely.
+On a fresh disposable server, a test restore command returned exit code `75`
+until the plugin enabled it five seconds later. During that outage, a second
+saved chunk containing a diamond block loaded successfully, showing that the
+Moonrise I/O thread remained available. The result file contained
+`OUTAGE_SERVER_ALIVE_AND_LOCAL_CHUNK_LOADED` and
+`OUTAGE_RECOVERED:<milliseconds>ms` in about 6.5 seconds; after connectivity
+returned, the requested chunk's gold block loaded and the remote marker was
+removed. Paper rewrites region data when it saves the loaded chunk, so the
+post-shutdown region file is not a raw
+checksum comparison. The Python suite separately checks bundle checksums and
+publication rules. This test uses an injected temporary failure; it does not
+simulate Luna becoming unreachable or measure player-facing latency.
 
-Build it against the Paper API matching the patched server, put the resulting
-JAR in the disposable server's `plugins` directory, and run with:
+A second disposable run used a restore command that always exited nonzero.
+Paper stopped on its unrecoverable chunk-system failure; the remote marker
+remained and no local terrain region was created. This verifies fail-closed
+behavior, but permanent restore or configuration errors still stop the whole
+Paper process. Repeat it with
+[`check-permanent-restore-failure.sh`](check-permanent-restore-failure.sh).
+
+Earlier disposable cold restores of the same 638,976-byte region took 9.381 and
+7.528 seconds. Those timings were single-region reads, not player-latency
+measurements.
+
+## Run it
+
+Build the plugin against the Paper API matching the patched server, put its JAR
+in the disposable server's `plugins` directory, and run with:
 
 ```text
 -Dfiesta.test.mode=seed|verify|outage
 -Dfiesta.test.result=/path/in/the/disposable/test/root/result.txt
--Dfiesta.worldTier.config=/path/to/private/test-config.json
 -Dfiesta.test.chunkX=320
 -Dfiesta.test.chunkZ=320
+-Dfiesta.worldTier.config=/path/to/private/test-config.json
+-Dfiesta.worldTier.command=/path/to/disposable/restore-command
 ```
 
-The test configuration must point `server_root`, journal, and the dedicated
-remote object root at disposable locations. For the outage pass, make only the
-test endpoint unreachable. Never reuse the live server root or mark a
-production region remote-only for this test. Inspect the result file, Paper
-logs, and crash reports; then reconnect the test endpoint and restore the
-region before removing the test files. The private config, SSH key, host-key
-file, and test-world data must stay out of source control.
+For `outage`, also provide:
+
+```text
+-Dfiesta.test.restoreAvailable=/path/to/disposable/restore-ready
+-Dfiesta.test.outageMillis=5000
+```
+
+Configure the disposable restore command to exit `75` until the ready file
+exists. Once it exists, the command must restore the saved region and remove the
+test marker. For the permanent-failure check, mark a separate seeded region
+remote-only, leave the local region file absent, and make the command exit
+nonzero. Run the script with paths under `/tmp`; it expects Paper to stop, the
+marker to remain, and the local region file to stay absent. Point the config,
+journal, world and remote fixture at disposable locations. Never reuse Fiesta's
+live world or mark a production region remote-only. Check the result file,
+server logs, region marker and restored block. Keep private config, keys,
+host-key files and test-world data out of source control.

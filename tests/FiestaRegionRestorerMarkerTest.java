@@ -35,8 +35,9 @@ public final class FiestaRegionRestorerMarkerTest {
         check(typedRestoreFailure, "restore failures must use the typed fail-closed exception");
 
         final FiestaWorldTierRestoreException tierFailure = new FiestaWorldTierRestoreException(
-            "restore failure", new IOException("remote store unavailable")
+            "restore failure", new IOException("remote store unavailable"), true
         );
+        check(tierFailure.isRetryable(), "transport failures should be retryable");
         check(FiestaWorldTierRestoreException.find(tierFailure) == tierFailure,
             "tier restore failures must remain identifiable after wrapping");
         check(FiestaWorldTierRestoreException.find(new RuntimeException("wrapper", tierFailure)) == tierFailure,

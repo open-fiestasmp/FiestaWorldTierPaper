@@ -5,7 +5,7 @@ Paper treats missing local data as empty terrain and for coordinating an
 explicit, leased offload call. This project is GPL-3.0
 because it changes Paper's GPL-licensed storage code.
 
-The implementation consists of six ordered Paper patches and six small Java
+The implementation consists of eight ordered Paper patches and six small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
@@ -29,6 +29,12 @@ helpers:
 - `paper-server/patches/features/0039-...patch` calls an optional
   budget scheduler from active and empty-server ticks. It stays disabled unless
   both a local byte target and scheduler interval are explicitly configured.
+- `paper-server/patches/features/0040-...patch` reschedules region reads after
+  temporary SSH transport failures. It retries asynchronously instead of
+  blocking Moonrise's region I/O thread or returning an empty chunk.
+- `paper-server/patches/features/0041-...patch` leaves retryable restore
+  failures to the retry handler, avoiding an error-level stack trace for each
+  expected retry while permanent read failures remain visible.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
@@ -61,7 +67,7 @@ GIT_COMMITTER_NAME='FiestaSMP Engineering' GIT_COMMITTER_EMAIL='noreply@github.c
 ./gradlew createMojmapBundlerJar
 ```
 
-All six patches are ordered and version-specific. Rebase and rebuild them
+All eight patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.
 
 ## Runtime wiring
@@ -166,8 +172,8 @@ restored with the gold block intact and marker cleared. Publish took 17.1 s
 and restore 8.5 s; without multiplexing, the same region took 41.0 s and
 29.8 s. This was an internal chunk request, not a player session, and the
 restore delay remains noticeable. This was an internal chunk request, not a
-player session. The later outage test below verifies fail-closed behavior and
-retry after reconnect, but player-facing latency still needs validation. Test
+player session. The later outage test below verifies asynchronous retry, but
+player-facing latency still needs validation. Test
 roots were removed; Fiesta's live worlds were untouched.
 
 A follow-up direct SFTP benchmark downloaded the same 651 KiB synthetic region
@@ -202,10 +208,10 @@ The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
 scheduler on Fiesta.
 
-The patches build as part of the isolated Paper 1.21.11 checkout. A restore
-failure becomes a fatal chunk-system error and stops the server rather than
-allowing the failed region to load as empty terrain. Run the
-standalone Java lease and marker fixtures with:
+The patches build as part of the isolated Paper 1.21.11 checkout. Permanent
+restore failures still fail closed rather than allowing a marked region to load
+as empty terrain. Temporary SSH transport failures are rescheduled by Moonrise.
+Run the standalone Java lease and marker fixtures with:
 
 ```sh
 ./tests/run-marker-fixture.sh
@@ -216,10 +222,11 @@ cancelled waiters do not block progress, the process lease excludes another
 file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, and the tier-failure type remains detectable through wrapped
-exceptions. The complete isolated Paper checkout at the pinned Fiesta base
-applied all six patches and built `createMojmapBundlerJar`; the compiled server
-JAR contains the restore, lease, offload, access-tracker, and scheduler classes.
-The standalone Java fixtures pass, all 68 companion Python unit tests pass, and a separate
+exceptions. An isolated checkout at the pinned Fiesta base built
+`createMojmapBundlerJar` with the asynchronous retry and retry-log changes; the
+compiled server JAR contains the restore, lease, offload, access-tracker, and
+scheduler classes.
+The standalone Java fixtures pass, all 76 companion Python unit tests pass, and a separate
 Linux fixture confirmed that Python observes the Java process lock with
 `fcntl.lockf`.
 
@@ -242,12 +249,14 @@ multiplexed store attempt timed out, though a subsequent complete run passed;
 mid-transfer interruption and retry behavior still need more testing.
 
 This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. A later disposable Paper hook test verified a
-saved chunk restore from Luna, then verified that an unreachable endpoint
-fails closed and that the same chunk can be restored after reconnecting. The
-`/forceload add` check covers the batched transport path, while the asynchronous
-API probe confirms one demand restore without a measured server tick stall.
-None of these establish live player latency or production rollout readiness.
+world data was transferred. An earlier synchronous outage probe stopped its
+disposable server. With the asynchronous retry patch, the disposable server
+kept ticking while the test restore command returned the temporary-failure
+status. A separate saved chunk loaded during the outage, then the original
+gold-block chunk loaded after the command became available. This checks
+Moonrise's retry path, not a real Luna outage or player-facing latency. A
+permanent restore failure left its marker in place and created no local region,
+but currently stops Paper. Production eviction remains disabled.
 
 ## License
 

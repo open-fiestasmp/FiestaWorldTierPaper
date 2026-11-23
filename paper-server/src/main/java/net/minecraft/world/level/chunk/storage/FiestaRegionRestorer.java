@@ -20,6 +20,7 @@ final class FiestaRegionRestorer {
     private static final String COMMAND_PROPERTY = "fiesta.worldTier.command";
     private static final String CONFIG_PROPERTY = "fiesta.worldTier.config";
     private static final String TIMEOUT_PROPERTY = "fiesta.worldTier.restoreTimeoutSeconds";
+    private static final int RETRY_EXIT_CODE = 75;
     private static final String DEFAULT_COMMAND = "/usr/local/bin/fiesta-world-tier";
     private static final String DEFAULT_CONFIG = "/etc/fiesta-world-tier/config.json";
     private static final long DEFAULT_TIMEOUT_SECONDS = 300L;
@@ -126,6 +127,7 @@ final class FiestaRegionRestorer {
             environment.clear();
             environment.put("PATH", path);
             environment.put("LANG", "C");
+            environment.put("FIESTA_WORLD_TIER_PAPER", "1");
             builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
             builder.redirectError(ProcessBuilder.Redirect.INHERIT);
 
@@ -142,13 +144,20 @@ final class FiestaRegionRestorer {
                     process.waitFor(Math.min(timeoutSeconds, 10L), TimeUnit.SECONDS);
                     throw new IOException("Fiesta world-tier restore timed out after " + timeoutSeconds + " seconds");
                 }
-                if (process.exitValue() != 0) {
-                    throw new IOException("Fiesta world-tier restore failed with exit code " + process.exitValue());
-                }
             } catch (final InterruptedException ex) {
                 process.destroyForcibly();
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while restoring a Fiesta world-tier region", ex);
+            }
+
+            final int exitCode = process.exitValue();
+            if (exitCode == RETRY_EXIT_CODE) {
+                throw new FiestaWorldTierRestoreException(
+                    "Fiesta remote region storage is temporarily unavailable for " + regionName, null, true
+                );
+            }
+            if (exitCode != 0) {
+                throw new IOException("Fiesta world-tier restore failed with exit code " + exitCode);
             }
 
             if (Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
