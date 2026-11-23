@@ -238,7 +238,7 @@ requests for one marked region run a single restore helper; it tests the
 restorer lock, not Paper's full chunk scheduler. A timeout fixture also checks
 that child processes stop while the remote marker and missing local region stay
 intact.
-The standalone Java fixtures pass, all 77 companion Python unit tests pass, and
+The standalone Java fixtures pass, all 78 companion Python unit tests pass, and
 a separate Linux fixture confirmed that Python observes the Java process lock
 with `fcntl.lockf`.
 
