@@ -3,6 +3,7 @@ package net.minecraft.world.level.chunk.storage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
@@ -38,14 +39,14 @@ final class FiestaRegionRestorer {
     /**
      * Any durable marker requires recovery. A surviving terrain file does not
      * prove that eviction completed: a crash may have deleted only the entity,
-     * POI, or oversized-chunk members of the bundle. Invalid markers also
-     * return true so the real I/O path fails closed instead of using Moonrise's
-     * negative cache.
+     * POI, or oversized-chunk members of the bundle. Invalid markers or marker
+     * paths also return true so the I/O path fails closed instead of using
+     * Moonrise's negative cache.
      */
     static boolean needsRestore(final Path storageFolder, final int chunkX, final int chunkZ) {
         try {
             final Path marker = markerPath(storageFolder, chunkX, chunkZ);
-            if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+            if (markerAttributesOrNull(marker) == null) {
                 return false;
             }
             markerState(marker); // validate the durable state before entering recovery
@@ -84,7 +85,7 @@ final class FiestaRegionRestorer {
         final int chunkZ
     ) throws IOException {
         final Path marker = markerPath(storageFolder, chunkX, chunkZ);
-        if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+        if (markerAttributesOrNull(marker) == null) {
             return false;
         }
 
@@ -99,15 +100,16 @@ final class FiestaRegionRestorer {
         final Object lock = LOCKS[(marker.hashCode() & 0x7fffffff) % LOCKS.length];
 
         synchronized (lock) {
-            if (!Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
-                if (Files.isRegularFile(terrainRegion, LinkOption.NOFOLLOW_LINKS)) {
+            if (markerAttributesOrNull(marker) == null) {
+                final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
+                if (localTerrain != null && localTerrain.isRegularFile()) {
                     return true;
                 }
                 throw new IOException("Fiesta world-tier marker disappeared before local data was restored: " + marker);
             }
             markerState(marker);
-            if (Files.exists(terrainRegion, LinkOption.NOFOLLOW_LINKS)
-                && !Files.isRegularFile(terrainRegion, LinkOption.NOFOLLOW_LINKS)) {
+            final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
+            if (localTerrain != null && !localTerrain.isRegularFile()) {
                 throw new IOException("Local terrain region is not a regular file: " + terrainRegion);
             }
             final Path command = configuredPath(COMMAND_PROPERTY, DEFAULT_COMMAND, true);
@@ -160,20 +162,46 @@ final class FiestaRegionRestorer {
                 throw new IOException("Fiesta world-tier restore failed with exit code " + exitCode);
             }
 
-            if (Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) {
+            if (markerAttributesOrNull(marker) != null) {
                 throw new IOException("Fiesta world-tier restore command did not clear the marker after publishing local data");
             }
-            final BasicFileAttributes attributes;
-            try {
-                attributes = Files.readAttributes(terrainRegion, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            } catch (final IOException ex) {
-                throw new IOException("Restore completed without publishing the expected terrain region " + regionName, ex);
+            final BasicFileAttributes attributes = attributesOrNull(terrainRegion);
+            if (attributes == null) {
+                throw new IOException("Restore completed without publishing the expected terrain region " + regionName);
             }
             if (!attributes.isRegularFile()) {
                 throw new IOException("Restored terrain region is not a regular file: " + regionName);
             }
             return true;
         }
+    }
+
+    private static BasicFileAttributes attributesOrNull(final Path path) throws IOException {
+        try {
+            return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (final NoSuchFileException ex) {
+            return null;
+        }
+    }
+
+    private static BasicFileAttributes markerAttributesOrNull(final Path marker) throws IOException {
+        final Path remoteDirectory = marker.getParent();
+        final Path stateDirectory = remoteDirectory.getParent();
+        final BasicFileAttributes stateAttributes = attributesOrNull(stateDirectory);
+        if (stateAttributes == null) {
+            return null;
+        }
+        if (!stateAttributes.isDirectory()) {
+            throw new IOException("Fiesta world-tier state path is not a directory: " + stateDirectory);
+        }
+        final BasicFileAttributes remoteAttributes = attributesOrNull(remoteDirectory);
+        if (remoteAttributes == null) {
+            return null;
+        }
+        if (!remoteAttributes.isDirectory()) {
+            throw new IOException("Fiesta world-tier remote marker path is not a directory: " + remoteDirectory);
+        }
+        return attributesOrNull(marker);
     }
 
     private static Path markerPath(final Path storageFolder, final int chunkX, final int chunkZ) throws IOException {
@@ -200,6 +228,9 @@ final class FiestaRegionRestorer {
     }
 
     static String markerState(final Path marker) throws IOException {
+        if (markerAttributesOrNull(marker) == null) {
+            throw new IOException("Missing Fiesta world-tier marker: " + marker);
+        }
         validateMarker(marker);
         final String contents = Files.readString(marker, java.nio.charset.StandardCharsets.UTF_8);
         final Matcher matcher = MARKER_STATE.matcher(contents);

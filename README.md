@@ -221,8 +221,9 @@ The fixtures check that shared leases wait fairly around exclusive requests,
 cancelled waiters do not block progress, the process lease excludes another
 file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
-closed, and the tier-failure type remains detectable through wrapped
-exceptions. An isolated checkout at the pinned Fiesta base built
+closed, unreadable or malformed marker paths fail closed without creating a
+local terrain region, and the tier-failure type remains detectable through
+wrapped exceptions. An isolated checkout at the pinned Fiesta base built
 `createMojmapBundlerJar` with the asynchronous retry and retry-log changes; the
 compiled server JAR contains the restore, lease, offload, access-tracker, and
 scheduler classes.

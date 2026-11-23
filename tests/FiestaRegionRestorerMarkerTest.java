@@ -3,6 +3,7 @@ package net.minecraft.world.level.chunk.storage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 
 public final class FiestaRegionRestorerMarkerTest {
     public static void main(final String[] args) throws Exception {
@@ -45,6 +46,29 @@ public final class FiestaRegionRestorerMarkerTest {
 
         Files.delete(marker);
         check(!FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0), "removed marker should allow local data");
+
+        Files.delete(terrain);
+        Files.setPosixFilePermissions(markerDirectory, PosixFilePermissions.fromString("---------"));
+        boolean permissionDenied = !Files.isReadable(markerDirectory);
+        if (!permissionDenied) {
+            Files.setPosixFilePermissions(markerDirectory, PosixFilePermissions.fromString("rwx------"));
+            Files.delete(markerDirectory);
+            Files.delete(markerDirectory.getParent());
+            Files.writeString(dimension.resolve(".world-tier"), "not a directory");
+        }
+        check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
+            "an unreadable marker path must force recovery");
+        typedRestoreFailure = false;
+        try {
+            FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0);
+        } catch (final FiestaWorldTierRestoreException expected) {
+            typedRestoreFailure = true;
+        }
+        check(typedRestoreFailure, "an unreadable marker path must fail closed");
+        check(!Files.exists(terrain), "a failed marker check must not create an empty local region");
+        if (permissionDenied) {
+            Files.setPosixFilePermissions(markerDirectory, PosixFilePermissions.fromString("rwx------"));
+        }
 
         try (var paths = Files.walk(dimension)) {
             for (final Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
