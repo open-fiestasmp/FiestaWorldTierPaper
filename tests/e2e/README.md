@@ -8,9 +8,10 @@ end-to-end network latency.
 
 ## Current result
 
-An earlier synchronous outage test stopped Paper when the restore endpoint was
-unreachable. The current patch returns retryable transport failures to Moonrise,
-which reschedules the region read asynchronously with capped backoff.
+An earlier synchronous outage test stopped the requested chunk load when the
+restore endpoint was unreachable. The current patch returns marked-region
+restore failures to Moonrise as retryable, which reschedules the region read
+asynchronously with capped backoff.
 
 On a fresh disposable server, a test restore command returned exit code `75`
 until the plugin enabled it five seconds later. During that outage, a second
@@ -25,12 +26,16 @@ checksum comparison. The Python suite separately checks bundle checksums and
 publication rules. This test uses an injected temporary failure; it does not
 simulate Luna becoming unreachable or measure player-facing latency.
 
-A second disposable run used a restore command that always exited nonzero.
-Paper stopped on its unrecoverable chunk-system failure; the remote marker
-remained and no local terrain region was created. This verifies fail-closed
-behavior, but permanent restore or configuration errors still stop the whole
-Paper process. Repeat it with
-[`check-permanent-restore-failure.sh`](check-permanent-restore-failure.sh).
+A separate probe verifies recovery from nonzero restore failures. Its fixture
+command first exits with code `1`, keeping the region unavailable. Paper keeps
+the chunk pending and applies a per-region cooldown to limit restore-command
+retries. In the 2026-11-24 run, the fixture failed for five seconds and was
+called three times; Paper stayed alive, loaded an unrelated saved chunk, and
+kept the marker while the terrain file was absent. Once the fixture was allowed
+to restore the saved region, the gold block loaded and the marker cleared in
+6.6 seconds. The harness fails if more than six restore commands run during
+that outage. Run it with [`check-restore-retry.sh`](check-restore-retry.sh).
+This checks a local test fixture, not a Luna outage or player-facing latency.
 
 Earlier disposable cold restores of the same 638,976-byte region took 9.381 and
 7.528 seconds. Those timings were single-region reads, not player-latency
@@ -92,13 +97,15 @@ For `outage`, also provide:
 -Dfiesta.test.outageMillis=5000
 ```
 
-Configure the disposable restore command to exit `75` until the ready file
-exists. Once it exists, the command must restore the saved region and remove the
-test marker. For the permanent-failure check, mark a separate seeded region
-remote-only, leave the local region file absent, and make the command exit
-nonzero. Run the script with paths under `/tmp`; it expects Paper to stop, the
-marker to remain, and the local region file to stay absent. Point the config,
-journal, world and remote fixture at disposable locations. Never reuse Fiesta's
-live world or mark a production region remote-only. Check the result file,
-server logs, region marker and restored block. Keep private config, keys,
-host-key files and test-world data out of source control.
+To run the nonzero-failure probe, seed a target saved chunk and a separate local
+probe chunk, save a copy of the target region under `/tmp`, then remove the
+target region and create its `REMOTE_ONLY` marker. Copy
+[`retry-restore-command.sh`](retry-restore-command.sh) under `/tmp` and set the
+required environment variables listed by `check-restore-retry.sh`. The harness
+keeps the fixture command returning `1` until the local probe chunk has loaded;
+it then permits the command to restore the saved region. It expects multiple
+nonzero attempts, the marker and absent region to remain intact during failure,
+and the saved gold block to load after recovery. Keep the server, config,
+backup, scripts, and result files under `/tmp`. Never use Fiesta's live world
+or mark a production region remote-only. Keep private config, keys, host-key
+files, and test-world data out of source control.

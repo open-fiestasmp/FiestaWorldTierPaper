@@ -30,11 +30,11 @@ helpers:
   budget scheduler from active and empty-server ticks. It stays disabled unless
   both a local byte target and scheduler interval are explicitly configured.
 - `paper-server/patches/features/0040-...patch` reschedules region reads after
-  temporary SSH transport failures. It retries asynchronously instead of
-  blocking Moonrise's region I/O thread or returning an empty chunk.
-- `paper-server/patches/features/0041-...patch` leaves retryable restore
-  failures to the retry handler, avoiding an error-level stack trace for each
-  expected retry while permanent read failures remain visible.
+  any marked-region restore failure, including nonzero command exits. Capped
+  asynchronous backoff keeps the requested chunk unavailable without stopping
+  Paper or returning an empty chunk.
+- `paper-server/patches/features/0041-...patch` leaves tier restore failures
+  to the retry handler, which reports them at a bounded warning rate.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
   companion `fiesta-world-tier restore` command when needed.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
@@ -212,9 +212,10 @@ The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
 scheduler on Fiesta.
 
-The patches build as part of the isolated Paper 1.21.11 checkout. Permanent
-restore failures still fail closed rather than allowing a marked region to load
-as empty terrain. Temporary SSH transport failures are rescheduled by Moonrise.
+The patches build as part of the isolated Paper 1.21.11 checkout. Marked-region
+restore failures remain pending and retry asynchronously; the test suite checks
+that Paper stays up, unrelated saved chunks load, and the original marked data
+is restored once the disposable endpoint recovers.
 Run the standalone Java lease and marker fixtures with:
 
 ```sh
@@ -264,14 +265,13 @@ exit. Automated stale-lock cleanup, a mid-file disconnect, and a Paper JVM
 crash remain untested.
 
 This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. An earlier synchronous outage probe stopped its
-disposable server. With the asynchronous retry patch, the disposable server
-kept ticking while the test restore command returned the temporary-failure
-status. A separate saved chunk loaded during the outage, then the original
-gold-block chunk loaded after the command became available. This checks
-Moonrise's retry path, not a real Luna outage or player-facing latency. A
-permanent restore failure left its marker in place and created no local region,
-but currently stops Paper. Production eviction remains disabled.
+world data was transferred. Disposable recovery tests check temporary and
+nonzero restore failures, preservation of the remote marker while the local
+region is absent, continued loading of unrelated saved chunks, and restoration
+of the saved chunk after recovery. The nonzero-exit outage probe kept Paper
+alive, loaded a nearby saved chunk, and restored the requested region after
+three fixture calls over 6.6 seconds. It does not reproduce a real Luna outage
+or measure player-facing latency. Production eviction remains disabled.
 
 ## License
 

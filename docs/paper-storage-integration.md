@@ -233,3 +233,11 @@ A fresh Paper process loaded the saved gold block successfully. The unique
 remote and local test roots were then removed. This validates fail-closed
 outage behavior and a later retry on disposable data, but not a process crash
 during transfer, live-player latency, or production rollout.
+
+On 2026-11-24, a separate disposable test repeatedly returned exit code `1`
+from the restore command. Paper kept the chunk pending, left the marker in
+place, and continued loading an unrelated saved chunk. A per-region retry
+cooldown limited the helper to three calls during the five-second injected
+outage. After the fixture was allowed to restore the saved data, Paper loaded
+the gold block and cleared the marker in 6.6 seconds. This checks a local
+fixture, not Luna failure handling or player-facing latency.
