@@ -1,12 +1,24 @@
 package org.openfiestasmp.worldtier.test;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
+import org.bukkit.block.Barrel;
+import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** Disposable-only probe for saving, restoring, and testing a remote outage. */
@@ -25,11 +37,14 @@ public final class FiestaTierE2E extends JavaPlugin {
             }
             final int chunkX = Integer.getInteger("fiesta.test.chunkX", 0);
             final int chunkZ = Integer.getInteger("fiesta.test.chunkZ", 0);
-            if (!(mode.equals("seed") || mode.equals("verify") || mode.equals("outage"))) {
+            if (!(mode.equals("seed") || mode.equals("verify") || mode.equals("outage")
+                || mode.equals("seed-rich") || mode.equals("verify-rich"))) {
                 throw new IllegalArgumentException("unsupported test mode");
             }
             final long loadStartedNanos = System.nanoTime();
-            final var load = world.getChunkAtAsync(chunkX, chunkZ, mode.equals("seed"));
+            final var load = world.getChunkAtAsync(
+                chunkX, chunkZ, mode.equals("seed") || mode.equals("seed-rich")
+            );
             load.whenComplete((chunk, failure) -> {
                 final long chunkLoadMillis = TimeUnit.NANOSECONDS.toMillis(
                     System.nanoTime() - loadStartedNanos
@@ -131,6 +146,15 @@ public final class FiestaTierE2E extends JavaPlugin {
                     }
                     report("RESTORED:" + chunkLoadMillis + "ms");
                 }
+                case "seed-rich" -> {
+                    seedRichRegion(world, chunkX, chunkZ);
+                    world.save();
+                    report("SEEDED_FULL_DATA:" + chunkLoadMillis + "ms");
+                }
+                case "verify-rich" -> {
+                    verifyRichRegion(world, chunk, chunkX, chunkZ, actual);
+                    report("FULL_DATA_RESTORED:" + chunkLoadMillis + "ms");
+                }
                 case "outage" -> {
                     if (actual != Material.GOLD_BLOCK) {
                         throw new IllegalStateException("expected GOLD_BLOCK after the outage, found " + actual);
@@ -146,6 +170,93 @@ public final class FiestaTierE2E extends JavaPlugin {
                 Bukkit.shutdown();
             }
         }
+    }
+
+    private void seedRichRegion(World world, int chunkX, int chunkZ) {
+        final int baseX = chunkX * 16;
+        final int baseZ = chunkZ * 16;
+        world.getBlockAt(baseX + 1, 80, baseZ + 1).setType(Material.GOLD_BLOCK, false);
+        world.getBlockAt(baseX + 4, 81, baseZ + 1).setType(Material.LECTERN, false);
+
+        final ArmorStand stand = (ArmorStand)world.spawnEntity(
+            new Location(world, baseX + 5.5, 81.0, baseZ + 5.5), EntityType.ARMOR_STAND
+        );
+        stand.setCustomName("fiesta-tier-e2e-entity");
+        stand.setPersistent(true);
+        stand.setGravity(false);
+
+        final NamespacedKey payloadKey = new NamespacedKey(this, "tier_payload");
+        for (int barrelX = 0; barrelX < 4; ++barrelX) {
+            for (int barrelZ = 0; barrelZ < 4; ++barrelZ) {
+                final int x = baseX + 1 + barrelX * 3;
+                final int z = baseZ + 1 + barrelZ * 3;
+                world.getBlockAt(x, 82, z).setType(Material.BARREL, false);
+                final Barrel barrel = (Barrel)world.getBlockAt(x, 82, z).getState();
+                final var inventory = barrel.getSnapshotInventory();
+                for (int slot = 0; slot < inventory.getSize(); ++slot) {
+                    final ItemStack item = new ItemStack(Material.PAPER);
+                    final ItemMeta meta = item.getItemMeta();
+                    meta.getPersistentDataContainer().set(
+                        payloadKey, PersistentDataType.BYTE_ARRAY, oversizedPayload(x, z, slot)
+                    );
+                    item.setItemMeta(meta);
+                    inventory.setItem(slot, item);
+                }
+                if (!barrel.update(true, false)) {
+                    throw new IllegalStateException("could not save oversized-chunk fixture barrel");
+                }
+            }
+        }
+    }
+
+    private void verifyRichRegion(World world, org.bukkit.Chunk chunk, int chunkX, int chunkZ, Material terrain)
+        throws IOException {
+        if (terrain != Material.GOLD_BLOCK) {
+            throw new IllegalStateException("expected GOLD_BLOCK, found " + terrain);
+        }
+        final int baseX = chunkX * 16;
+        final int baseZ = chunkZ * 16;
+        final Path worldRoot = world.getWorldFolder().toPath();
+        final String regionName = "r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca";
+        if (!Files.isRegularFile(worldRoot.resolve("entities").resolve(regionName))) {
+            throw new IllegalStateException("restored entity region file is missing");
+        }
+        if (!Files.isRegularFile(worldRoot.resolve("poi").resolve(regionName))) {
+            throw new IllegalStateException("restored POI region file is missing");
+        }
+        final Path sidecar = worldRoot.resolve("region").resolve("c." + chunkX + "." + chunkZ + ".mcc");
+        if (!Files.isRegularFile(sidecar) || Files.size(sidecar) <= 1_048_576L) {
+            throw new IllegalStateException("restored oversized chunk sidecar is missing or too small");
+        }
+        if (world.getBlockAt(baseX + 4, 81, baseZ + 1).getType() != Material.LECTERN) {
+            throw new IllegalStateException("restored POI block is missing");
+        }
+        boolean entityFound = false;
+        for (final Entity entity : chunk.getEntities()) {
+            if ("fiesta-tier-e2e-entity".equals(entity.getCustomName())) {
+                entityFound = true;
+                break;
+            }
+        }
+        if (!entityFound) {
+            throw new IllegalStateException("restored entity marker is missing");
+        }
+        final Barrel barrel = (Barrel)world.getBlockAt(baseX + 1, 82, baseZ + 1).getState();
+        final ItemStack item = barrel.getSnapshotInventory().getItem(0);
+        final byte[] payload = item == null || !item.hasItemMeta() ? null
+            : item.getItemMeta().getPersistentDataContainer().get(
+                new NamespacedKey(this, "tier_payload"), PersistentDataType.BYTE_ARRAY
+            );
+        if (!Arrays.equals(payload, oversizedPayload(baseX + 1, baseZ + 1, 0))) {
+            throw new IllegalStateException("restored oversized chunk data is missing");
+        }
+    }
+
+    private static byte[] oversizedPayload(int x, int z, int slot) {
+        final byte[] payload = new byte[4096];
+        final long seed = 0x4653544100000000L ^ ((long)x << 32) ^ ((long)z << 8) ^ slot;
+        new Random(seed).nextBytes(payload);
+        return payload;
     }
 
     private void finishFailure(String mode, Throwable error) {

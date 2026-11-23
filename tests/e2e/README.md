@@ -36,13 +36,39 @@ Earlier disposable cold restores of the same 638,976-byte region took 9.381 and
 7.528 seconds. Those timings were single-region reads, not player-latency
 measurements.
 
+## Full component restore
+
+`seed-rich` writes a gold terrain marker, a persistent armor-stand entity, a
+lectern POI, and 16 barrels containing deterministic binary item data. The
+barrel data forces Paper to create an external `.mcc` chunk file. A disposable
+restore test then removes the local bundle, leaves a `REMOTE_ONLY` marker, and
+uses a hash-checking fixture command to publish all four bundle members again.
+`verify-rich` loads the chunk through Paper and checks the gold block, entity,
+lectern, barrel payload, entity and POI region files, and the oversized sidecar.
+
+On 2026-11-24, the fixture produced a 1,787,248-byte `.mcc` file containing the
+chunk at `320,320`; its decompressed NBT was 1,891,278 bytes. The Paper restore
+hook invoked the hash-checking local fixture command, which restored the terrain,
+entity, POI, and `.mcc` files before Paper loaded them. The verification callback
+completed in 889 ms. This used a local disposable fixture, not Luna, and is not
+a player-facing latency measurement.
+
+To repeat it, run the plugin once in `seed-rich` mode with the target chunk
+coordinates. Confirm the matching `r.x.z.mca` files in `region`, `entities`,
+and `poi`, plus a `.mcc` sidecar larger than 1 MiB. Copy those four files into a
+disposable remote fixture and record their SHA-256 hashes. Remove only those
+test-world files, write a `REMOTE_ONLY` marker, and run the plugin in
+`verify-rich` mode with a restore command that verifies the hashes, republishes
+all four files, and clears the marker. Keep the server, config, and fixture
+under `/tmp`; never point this test at Fiesta's live world.
+
 ## Run it
 
 Build the plugin against the Paper API matching the patched server, put its JAR
 in the disposable server's `plugins` directory, and run with:
 
 ```text
--Dfiesta.test.mode=seed|verify|outage
+-Dfiesta.test.mode=seed|verify|outage|seed-rich|verify-rich
 -Dfiesta.test.result=/path/in/the/disposable/test/root/result.txt
 -Dfiesta.test.chunkX=320
 -Dfiesta.test.chunkZ=320
