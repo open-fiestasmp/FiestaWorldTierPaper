@@ -116,12 +116,14 @@ public final class FiestaTierE2E extends JavaPlugin {
             final int chunkX = Integer.getInteger("fiesta.test.chunkX", 0);
             final int chunkZ = Integer.getInteger("fiesta.test.chunkZ", 0);
             if (!(mode.equals("seed") || mode.equals("verify") || mode.equals("outage")
-                || mode.equals("seed-rich") || mode.equals("verify-rich"))) {
+                || mode.equals("seed-rich") || mode.equals("verify-rich")
+                || mode.equals("seed-entity-rich") || mode.equals("verify-entity-rich"))) {
                 throw new IllegalArgumentException("unsupported test mode");
             }
             final long loadStartedNanos = System.nanoTime();
             final var load = world.getChunkAtAsync(
                 chunkX, chunkZ, mode.equals("seed") || mode.equals("seed-rich")
+                    || mode.equals("seed-entity-rich")
             );
             load.whenComplete((chunk, failure) -> {
                 final long chunkLoadMillis = TimeUnit.NANOSECONDS.toMillis(
@@ -233,11 +235,22 @@ public final class FiestaTierE2E extends JavaPlugin {
                     verifyRichRegion(world, chunk, chunkX, chunkZ, actual);
                     report("FULL_DATA_RESTORED:" + chunkLoadMillis + "ms");
                 }
+                case "seed-entity-rich" -> {
+                    seedEntitySidecar(world, chunkX, chunkZ);
+                    world.save();
+                    report("SEEDED_ENTITY_SIDECAR:" + chunkLoadMillis + "ms");
+                }
+                case "verify-entity-rich" -> {
+                    verifyEntitySidecar(world, chunk, chunkX, chunkZ);
+                    report("VERIFIED_ENTITY_SIDECAR:" + chunkLoadMillis + "ms");
+                }
                 case "outage" -> {
                     if (actual != Material.GOLD_BLOCK) {
                         throw new IllegalStateException("expected GOLD_BLOCK after the outage, found " + actual);
                     }
                     report("OUTAGE_RECOVERED:" + chunkLoadMillis + "ms");
+                    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 300L);
+                    deferredShutdown = true;
                 }
                 default -> throw new IllegalArgumentException("unsupported test mode");
             }
@@ -338,6 +351,61 @@ public final class FiestaTierE2E extends JavaPlugin {
     private static byte[] oversizedPayload(int x, int z, int slot) {
         final byte[] payload = new byte[4096];
         final long seed = 0x4653544100000000L ^ ((long)x << 32) ^ ((long)z << 8) ^ slot;
+        new Random(seed).nextBytes(payload);
+        return payload;
+    }
+
+    private void seedEntitySidecar(World world, int chunkX, int chunkZ) {
+        final int baseX = chunkX * 16;
+        final int baseZ = chunkZ * 16;
+        world.getBlockAt(baseX + 4, 81, baseZ + 1).setType(Material.LECTERN, false);
+        final ArmorStand stand = (ArmorStand)world.spawnEntity(
+            new Location(world, baseX + 5.5, 90.0, baseZ + 5.5), EntityType.ARMOR_STAND
+        );
+        stand.setCustomName("fiesta-tier-e2e-large-entity");
+        stand.setPersistent(true);
+        stand.setGravity(false);
+        stand.getPersistentDataContainer().set(
+            new NamespacedKey(this, "large_entity_payload"), PersistentDataType.BYTE_ARRAY,
+            entityPayload(chunkX, chunkZ)
+        );
+    }
+
+    private void verifyEntitySidecar(World world, org.bukkit.Chunk chunk, int chunkX, int chunkZ)
+        throws IOException {
+        final Path worldRoot = world.getWorldFolder().toPath();
+        final String regionName = "r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca";
+        if (!Files.isRegularFile(worldRoot.resolve("entities").resolve(regionName))) {
+            throw new IllegalStateException("entity region file is missing");
+        }
+        if (!Files.isRegularFile(worldRoot.resolve("poi").resolve(regionName))) {
+            throw new IllegalStateException("POI region file is missing");
+        }
+        final Path sidecar = worldRoot.resolve("entities").resolve("c." + chunkX + "." + chunkZ + ".mcc");
+        if (!Files.isRegularFile(sidecar) || Files.size(sidecar) <= 1_048_576L) {
+            throw new IllegalStateException("oversized entity sidecar is missing or too small");
+        }
+        if (world.getBlockAt(chunkX * 16 + 4, 81, chunkZ * 16 + 1).getType() != Material.LECTERN) {
+            throw new IllegalStateException("POI fixture did not survive restart");
+        }
+        for (final Entity entity : chunk.getEntities()) {
+            if (!"fiesta-tier-e2e-large-entity".equals(entity.getCustomName())) {
+                continue;
+            }
+            final byte[] payload = entity.getPersistentDataContainer().get(
+                new NamespacedKey(this, "large_entity_payload"), PersistentDataType.BYTE_ARRAY
+            );
+            if (Arrays.equals(payload, entityPayload(chunkX, chunkZ))) {
+                return;
+            }
+            throw new IllegalStateException("large entity payload did not survive restart");
+        }
+        throw new IllegalStateException("large persistent entity is missing after restart");
+    }
+
+    private static byte[] entityPayload(int chunkX, int chunkZ) {
+        final byte[] payload = new byte[1_500_000];
+        final long seed = 0x4653544100000000L ^ ((long)chunkX << 32) ^ chunkZ;
         new Random(seed).nextBytes(payload);
         return payload;
     }

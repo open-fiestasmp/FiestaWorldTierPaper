@@ -30,13 +30,15 @@ helpers:
   budget scheduler from active and empty-server ticks. It stays disabled unless
   both a local byte target and scheduler interval are explicitly configured.
 - `paper-server/patches/features/0040-...patch` reschedules region reads after
-  temporary SSH transport failures. It retries asynchronously instead of
-  blocking Moonrise's region I/O thread or returning an empty chunk.
-- `paper-server/patches/features/0041-...patch` leaves retryable restore
-  failures to the retry handler, avoiding an error-level stack trace for each
-  expected retry while permanent read failures remain visible.
+  any marked-region restore failure, including nonzero command exits. Capped
+  asynchronous backoff keeps the requested chunk unavailable without stopping
+  Paper or returning an empty chunk.
+- `paper-server/patches/features/0041-...patch` leaves tier restore failures
+  to the retry handler, which reports them at a bounded warning rate.
 - `paper-server/src/main/java/.../FiestaRegionRestorer.java` invokes the
-  companion `fiesta-world-tier restore` command when needed.
+  companion `fiesta-world-tier restore` command when needed and caps concurrent
+  retries for a marked region with a jittered cooldown. On timeout, it also
+  stops child transfer processes before returning the failure.
 - `paper-server/src/main/java/.../FiestaWorldTierRestoreException.java`
   identifies restore failures through Paper and Moonrise exception wrappers.
 - `paper-server/src/main/java/.../FiestaRegionLeaseManager.java` provides the
@@ -212,9 +214,11 @@ The companion CLI can seed an initial catalog, list age-eligible regions, and
 dry-run a local world-data budget plan. No production caller invokes the
 scheduler on Fiesta.
 
-The patches build as part of the isolated Paper 1.21.11 checkout. Permanent
-restore failures still fail closed rather than allowing a marked region to load
-as empty terrain. Temporary SSH transport failures are rescheduled by Moonrise.
+The patches build as part of the isolated Paper 1.21.11 checkout. Marked-region
+restore failures remain pending and retry asynchronously; the test suite checks
+that Paper stays up, unrelated saved chunks load, and the original marked data
+is restored once the disposable endpoint recovers. Paper's async chunk retry
+and the region restore helper both cap their backoff at five seconds.
 Run the standalone Java lease and marker fixtures with:
 
 ```sh
@@ -230,8 +234,12 @@ local terrain region, and the tier-failure type remains detectable through
 wrapped exceptions. An isolated checkout at the pinned Fiesta base built
 `createMojmapBundlerJar` with the asynchronous retry and retry-log changes; the
 compiled server JAR contains the restore, lease, offload, access-tracker, and
-scheduler classes.
-The standalone Java fixtures pass, all 77 companion Python unit tests pass, and
+scheduler classes. A 12-thread marker fixture also confirmed that simultaneous
+requests for one marked region run a single restore helper; it tests the
+restorer lock, not Paper's full chunk scheduler. A timeout fixture also checks
+that child processes stop while the remote marker and missing local region stay
+intact.
+The standalone Java fixtures pass, all 80 companion Python unit tests pass, and
 a separate Linux fixture confirmed that Python observes the Java process lock
 with `fcntl.lockf`.
 
@@ -264,15 +272,36 @@ exit. Automated stale-lock cleanup, a mid-file disconnect, and a Paper JVM
 crash remain untested.
 
 This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. With the asynchronous retry patch, a disposable
-server stayed up while the restore command returned the temporary-failure
-status, and a separate saved chunk loaded. A local client then received the
-restored target chunk after a controlled outage: 12.473 seconds from client
-start. Paper's cold-chunk request completed 13.405 seconds after that request
-began. The test used a local file-copy fixture, not Luna SFTP, so actual
-cold-load latency from Luna remains unmeasured. A permanent restore failure
-leaves its marker in place and creates no local region, but still stops Paper.
-Production eviction remains disabled.
+world data was transferred. Disposable recovery tests check temporary and
+nonzero restore failures, keep the marker and missing local region intact, load
+unrelated saved chunks, and restore the requested saved chunk after recovery.
+The permanent-failure probe kept Paper running through repeated failures; the
+marked chunk stayed unavailable and its request remained pending. A forced
+process-stop probe also confirmed that a marked region stayed unavailable
+across restart and restored after the fixture recovered.
+
+One local-file outage test delivered the target chunk to a localhost client
+12.473 seconds after the client started; Paper's chunk request completed 13.405
+seconds after it began. A separate local-client retry probe received a marked
+region's chunk packet 11.3 seconds after teleport. These tests use local
+fixtures, not Luna SFTP or a player's internet connection.
+
+A disposable Luna SFTP restore delivered a saved chunk to a loopback client:
+Paper loaded it 4.579 seconds after the join-triggered teleport, and the client
+received its target chunk about 5.047 seconds after login. A later test reset
+an active Luna SSH stream after 65,536 bytes; the marker stayed and no terrain
+file was published. After restarting only the disposable Paper process and
+restoring Luna connectivity, the chunk recovered in 40.8 seconds across the
+outage and restart. These are isolated observations, not an external player
+latency result or a real Luna provider outage. A separate 180-second SFTP
+publish timeout remains unexplained, although two later bounded publishes
+succeeded.
+
+The patch has not been installed on Fiesta, no production world data moved, and
+production eviction remains disabled. The tests cover specific injected and
+disposable failure paths; they do not prove every crash boundary, quota or full-
+disk behavior, concurrent production load, or acceptable player-facing cold-
+load latency.
 
 ## License
 
