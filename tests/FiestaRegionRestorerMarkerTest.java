@@ -55,6 +55,8 @@ public final class FiestaRegionRestorerMarkerTest {
         check(!FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0), "removed marker should allow local data");
 
         Files.delete(terrain);
+        check(!FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0),
+            "an absent marker and local region should not start a restore");
         Files.setPosixFilePermissions(markerDirectory, PosixFilePermissions.fromString("---------"));
         boolean permissionDenied = !Files.isReadable(markerDirectory);
         if (!permissionDenied) {
@@ -145,7 +147,7 @@ public final class FiestaRegionRestorerMarkerTest {
                     ++restored;
                 }
             }
-            check(restored == 1, "one concurrent caller should publish the region");
+            check(restored == workers, "all concurrent callers should observe the published region");
             check(Files.readAllLines(calls).size() == 1,
                 "concurrent reads must share a single region restore command");
             check(Files.isRegularFile(regionDirectory.resolve("r.0.0.mca")),

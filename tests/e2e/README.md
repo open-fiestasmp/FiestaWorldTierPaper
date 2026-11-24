@@ -112,6 +112,10 @@ helper with a child process that writes a liveness file. It verifies that the
 child stops, the marker remains, and no terrain region is published. This is a
 local process-cleanup check, not a network-outage test.
 
+The concurrency fixture starts twelve callers for one marked region. It
+expects one restore command and confirms every caller sees the published local
+region, including callers that reach the marker after the winning restore.
+
 The restore fixture defaults to exit code `1`. Set `failure_exit_code` to `75`
 in its disposable JSON config to cover the command's temporary-failure status
 as a separate case.

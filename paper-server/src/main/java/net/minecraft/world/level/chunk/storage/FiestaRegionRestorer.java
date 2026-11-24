@@ -98,6 +98,10 @@ final class FiestaRegionRestorer {
         final Path terrainRegion = dimensionRoot.resolve("region").resolve(regionName);
         final Object lock = LOCKS[(marker.hashCode() & 0x7fffffff) % LOCKS.length];
 
+        if (markerAttributesOrNull(marker) == null) {
+            return localTerrainReady(terrainRegion);
+        }
+
         synchronized (lock) {
             final RestoreRetryState retry = RETRIES.computeIfAbsent(marker, ignored -> new RestoreRetryState());
             if (retry.nextAttemptNanos > System.nanoTime()) {
@@ -108,7 +112,10 @@ final class FiestaRegionRestorer {
             try {
                 if (markerAttributesOrNull(marker) == null) {
                     RETRIES.remove(marker, retry);
-                    return false;
+                    if (!localTerrainReady(terrainRegion)) {
+                        throw new IOException("Fiesta world-tier marker disappeared before local terrain was restored: " + marker);
+                    }
+                    return true;
                 }
                 markerState(marker);
                 final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
@@ -181,6 +188,17 @@ final class FiestaRegionRestorer {
                 throw new FiestaWorldTierRestoreException("Fiesta world-tier region recovery failed", ex, true);
             }
         }
+    }
+
+    private static boolean localTerrainReady(final Path terrainRegion) throws IOException {
+        final BasicFileAttributes attributes = attributesOrNull(terrainRegion);
+        if (attributes == null) {
+            return false;
+        }
+        if (!attributes.isRegularFile()) {
+            throw new IOException("Local terrain region is not a regular file: " + terrainRegion);
+        }
+        return true;
     }
 
     private static void destroyProcessTree(final Process process) {
