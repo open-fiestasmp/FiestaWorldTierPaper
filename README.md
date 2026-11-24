@@ -284,7 +284,16 @@ and kept Paper running through five and six failed restore attempts. The
 affected chunk request remained pending until the disposable server was
 stopped. These tests do not reproduce a real Luna outage or measure
 player-facing latency.
-Production eviction remains disabled.
+
+A separate disposable Paper run used a unique Luna object root capped at 5 MB.
+With a 622,798-byte saved region published, the test config briefly pointed to
+a closed local port. Paper retried the read and continued loading a separate
+local chunk. After switching the test config back to Luna, Paper restored the
+saved gold block in 13.7 seconds, cleared the marker, and deleted the remote
+test object; measured remote usage returned to zero. This verifies the actual
+Luna SFTP restore path after an unreachable configured endpoint, but it does
+not simulate Luna losing an active connection or measure a player's cold-load
+experience. Production eviction remains disabled.
 
 ## License
 

@@ -52,6 +52,15 @@ using the same seeded marked-region setup and leaving the fixture's allow file
 absent. This checks that a permanent restore failure does not stop Paper or
 stall unrelated local chunk I/O; it does not measure player-facing behavior.
 
+A separate disposable integration run used a private test config and a unique
+Luna object root capped at 5 MB. After publishing a 622,798-byte saved region,
+the test config pointed Paper at a closed local port. Paper retried the marked
+region while the unrelated saved chunk loaded. Switching only that test
+config back to Luna restored the saved gold block in 13.7 seconds; the marker
+cleared and remote usage returned to zero. This tests retry after an unreachable
+configured endpoint followed by a real Luna SFTP restore. It does not interrupt
+an active Luna connection or measure a player's view of a cold chunk.
+
 [`check-restore-crash-restart.sh`](check-restore-crash-restart.sh) repeats the
 same marked-region setup, force-stops only its disposable Paper process while
 the restore is pending, and starts that world again. It checks that the marker
