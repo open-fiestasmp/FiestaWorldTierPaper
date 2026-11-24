@@ -217,7 +217,8 @@ scheduler on Fiesta.
 The patches build as part of the isolated Paper 1.21.11 checkout. Marked-region
 restore failures remain pending and retry asynchronously; the test suite checks
 that Paper stays up, unrelated saved chunks load, and the original marked data
-is restored once the disposable endpoint recovers.
+is restored once the disposable endpoint recovers. Paper's async chunk retry
+and the region restore helper both cap their backoff at five seconds.
 Run the standalone Java lease and marker fixtures with:
 
 ```sh
@@ -283,7 +284,12 @@ the marker and missing local terrain intact, loaded an unrelated saved chunk,
 and kept Paper running through five and six failed restore attempts. The
 affected chunk request remained pending until the disposable server was
 stopped. These tests do not reproduce a real Luna outage or measure
-player-facing latency.
+player-facing latency. With the five-second retry cap, a 22-second permanent
+failure probe made seven restore calls and left the marker in place. The
+crash/restart probe made three calls before the forced stop and six total
+before recovery. A localhost client received the marked region's chunk packet
+11.3 seconds after teleport. It used a local restore fixture, not a Luna
+outage or a player's internet connection.
 
 A separate disposable Paper run used a unique Luna object root capped at 5 MB.
 With a 622,798-byte saved region published, the test config briefly pointed to

@@ -160,6 +160,8 @@ public final class FiestaTierE2E extends JavaPlugin {
                         throw new IllegalStateException("expected GOLD_BLOCK after the outage, found " + actual);
                     }
                     report("OUTAGE_RECOVERED:" + chunkLoadMillis + "ms");
+                    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 300L);
+                    deferredShutdown = true;
                 }
                 default -> throw new IllegalArgumentException("unsupported test mode");
             }

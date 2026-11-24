@@ -8,7 +8,7 @@ c86a3e6bd9f0e76ac730390e53d58cc19c9b1d61a98cee8a93921012a0c94ea2  paper-server/p
 fc83672b53e33d745991cbbfc180c1e6f252e75ba4a948f2816cd703f893fa92  paper-server/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/io/FiestaRegionLeaseManager.java
 c67b11da16b8bb6971803d271210057bf59ae120fd2548d01f287c3ededcd341  paper-server/src/main/java/net/minecraft/server/FiestaWorldTierScheduler.java
 062a2258d986e7c881945e1c77b8888d3e32d1117c51a5aef2f9fc2860b46ad5  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaRegionOffloader.java
-4ef8e0ab3ee41d18c087fb0d88801eda77a2eb5a65bf120fd3467956bc84c490  paper-server/patches/features/0040-Retry-world-tier-restore-failures.patch
+804bd564bab7fa05f4a7c7f66ddcea667f3f08280281a88388d4d7ff935bdaf4  paper-server/patches/features/0040-Retry-world-tier-restore-failures.patch
 c458a9a19fd04b60715f1d66c607d39db5c79122660adb1f4e3e44a1d63ea899  paper-server/patches/features/0041-Quiet-world-tier-restore-retries.patch
-8d36b60de2b30f4a4454c6839b9b37d03ae71c104c047a082606e8b329c04309  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaRegionRestorer.java
+52108c215cf070ce4e27f19cd68d393c1b86e97234fc126e19864bfd960e71e7  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaRegionRestorer.java
 e888f3e87793f5f838dbb592238c4a48a5b1298cfa90d2cebd776bbaea2efcd0  paper-server/src/main/java/net/minecraft/world/level/chunk/storage/FiestaWorldTierRestoreException.java

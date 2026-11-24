@@ -199,7 +199,7 @@ final class FiestaRegionRestorer {
 
         private void recordFailure() {
             this.failures = Math.min(this.failures + 1, 6);
-            final long maximumDelay = Math.min(30_000L, 1_000L << (this.failures - 1));
+            final long maximumDelay = Math.min(5_000L, 1_000L << (this.failures - 1));
             final long delay = ThreadLocalRandom.current().nextLong(maximumDelay * 3L / 4L, maximumDelay + 1L);
             this.nextAttemptNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(delay);
         }

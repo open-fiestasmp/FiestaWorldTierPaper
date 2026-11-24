@@ -8,6 +8,14 @@ end-to-end network latency.
 
 ## Current result
 
+Both retry layers cap their delay at five seconds. In the 2026-11-24
+localhost player probe, a test client joined at spawn, teleported to a marked
+region, and received that region's `map_chunk` packet 11.3 seconds after the
+teleport command. The fixture cleared the marker and Paper exited cleanly.
+This measured a local client and a file-copy fixture, not a player's internet
+connection or a Luna outage. A previous run with a ten-second cap took 17
+seconds to recover after teleport.
+
 An earlier synchronous outage test stopped the requested chunk load when the
 restore endpoint was unreachable. The current patch returns marked-region
 restore failures to Moonrise as retryable, which reschedules the region read
@@ -49,8 +57,11 @@ the remote marker, and did not create the missing terrain region. The cold
 chunk request remained pending until the disposable process was stopped. Run it with
 [`check-permanent-restore-pending.sh`](check-permanent-restore-pending.sh),
 using the same seeded marked-region setup and leaving the fixture's allow file
-absent. This checks that a permanent restore failure does not stop Paper or
-stall unrelated local chunk I/O; it does not measure player-facing behavior.
+absent. With the five-second retry cap, a repeat made seven restore calls in
+the same window. Paper stayed running, the marker remained, and no local
+terrain region appeared. This checks that a permanent restore failure does
+not stop Paper or stall unrelated local chunk I/O; it does not measure
+player-facing behavior.
 
 A separate disposable integration run used a private test config and a unique
 Luna object root capped at 5 MB. After publishing a 622,798-byte saved region,
@@ -83,7 +94,8 @@ after the fixture is allowed to recover. Its restore config, command, world,
 logs, and marker paths must all stay under `/tmp`.
 With exit code `1`, two helper calls occurred before the crash and six total
 before recovery. With exit code `75`, three occurred before the crash and seven
-total before recovery.
+total before recovery. A repeat with the five-second retry cap made three
+calls before the forced stop and six total before recovery.
 
 The standalone marker fixture also sets a one-second timeout for a restore
 helper with a child process that writes a liveness file. It verifies that the
