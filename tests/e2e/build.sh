@@ -9,5 +9,5 @@ fi
 TEST_DIR=$(cd "$(dirname "$0")" && pwd)
 BUILD_DIR="$TEST_DIR/build"
 mkdir -p "$BUILD_DIR/classes"
-javac -classpath "$PAPER_TEST_CLASSPATH" -d "$BUILD_DIR/classes" "$TEST_DIR/FiestaTierE2E.java"
+javac --release 21 -classpath "$PAPER_TEST_CLASSPATH" -d "$BUILD_DIR/classes" "$TEST_DIR/FiestaTierE2E.java"
 jar --create --file "$BUILD_DIR/FiestaTierE2E.jar" -C "$BUILD_DIR/classes" . -C "$TEST_DIR" plugin.yml

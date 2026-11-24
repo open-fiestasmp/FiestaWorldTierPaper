@@ -16,6 +16,7 @@ import org.bukkit.block.Barrel;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -23,6 +24,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitRunnable;
 
 /** Disposable-only probe for saving, restoring, and testing a remote outage. */
 public final class FiestaTierE2E extends JavaPlugin {
@@ -31,7 +33,8 @@ public final class FiestaTierE2E extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new Listener() {
             @EventHandler
             public void onPlayerJoin(final PlayerJoinEvent event) {
-                if (!"outage".equals(System.getProperty("fiesta.test.mode", ""))) {
+                final String mode = System.getProperty("fiesta.test.mode", "");
+                if (!(mode.equals("outage") || mode.equals("cold"))) {
                     return;
                 }
                 final World world = Bukkit.getWorld("world");
@@ -41,12 +44,66 @@ public final class FiestaTierE2E extends JavaPlugin {
                 final int chunkX = Integer.getInteger("fiesta.test.chunkX", 0);
                 final int chunkZ = Integer.getInteger("fiesta.test.chunkZ", 0);
                 final Location target = new Location(world, chunkX * 16 + 8, 100.0D, chunkZ * 16 + 8);
-                event.getPlayer().teleportAsync(target).thenAccept(success ->
-                    report(success ? "PLAYER_TELEPORTED_TO_TARGET" : "PLAYER_TELEPORT_FAILED")
-                );
+                if (mode.equals("cold")) {
+                    final long coldStartedNanos = System.nanoTime();
+                    report("COLD_RESTORE_REQUESTED");
+                    final Player player = event.getPlayer();
+                    player.teleportAsync(target);
+                    new BukkitRunnable() {
+                        private int ticks;
+
+                        @Override
+                        public void run() {
+                            if (!player.isOnline()) {
+                                report("COLD_CLIENT_DISCONNECTED");
+                                cancel();
+                                Bukkit.shutdown();
+                                return;
+                            }
+                            final Location current = player.getLocation();
+                            if (player.getWorld() == world
+                                && (current.getBlockX() >> 4) == chunkX
+                                && (current.getBlockZ() >> 4) == chunkZ
+                                && world.isChunkLoaded(chunkX, chunkZ)) {
+                                if (world.getBlockAt(chunkX * 16 + 1, 80, chunkZ * 16 + 1).getType()
+                                    != Material.GOLD_BLOCK) {
+                                    report("COLD_CLIENT_BLOCK_CHECK_FAILED");
+                                    cancel();
+                                    Bukkit.shutdown();
+                                    return;
+                                }
+                                final long coldLoadMillis = TimeUnit.NANOSECONDS.toMillis(
+                                    System.nanoTime() - coldStartedNanos
+                                );
+                                report("COLD_CLIENT_CHUNK_READY:" + coldLoadMillis + "ms");
+                                cancel();
+                                final long keepAliveSeconds = Long.getLong("fiesta.test.keepAliveSeconds", 10L);
+                                if (keepAliveSeconds > 0L) {
+                                    Bukkit.getScheduler().runTaskLater(
+                                        FiestaTierE2E.this, Bukkit::shutdown, keepAliveSeconds * 20L
+                                    );
+                                } else {
+                                    Bukkit.shutdown();
+                                }
+                                return;
+                            }
+                            if (++this.ticks >= 1800) {
+                                report("COLD_CLIENT_TIMEOUT");
+                                cancel();
+                                Bukkit.shutdown();
+                            }
+                        }
+                    }.runTaskTimer(FiestaTierE2E.this, 1L, 1L);
+                } else {
+                    event.getPlayer().teleportAsync(target).thenAccept(success ->
+                        report(success ? "PLAYER_TELEPORTED_TO_TARGET" : "PLAYER_TELEPORT_FAILED")
+                    );
+                }
             }
         }, this);
-        Bukkit.getScheduler().runTaskLater(this, this::runProbe, 20L);
+        if (!"cold".equals(System.getProperty("fiesta.test.mode", ""))) {
+            Bukkit.getScheduler().runTaskLater(this, this::runProbe, 20L);
+        }
     }
 
     private void runProbe() {

@@ -17,7 +17,7 @@ function report(line) {
 const client = mc.createClient({
   host: process.env.FIESTA_TEST_HOST || '127.0.0.1',
   port: Number(process.env.FIESTA_TEST_PORT || 25671),
-  username: 'TierLatencyProbe',
+  username: process.env.FIESTA_TEST_USERNAME || 'TierLatencyProbe',
   auth: 'offline',
   version: '1.21.11'
 })

@@ -87,7 +87,7 @@ Build the plugin against the Paper API matching the patched server, put its JAR
 in the disposable server's `plugins` directory, and run with:
 
 ```text
--Dfiesta.test.mode=seed|verify|outage|seed-rich|verify-rich
+-Dfiesta.test.mode=seed|verify|outage|cold|seed-rich|verify-rich
 -Dfiesta.test.result=/path/in/the/disposable/test/root/result.txt
 -Dfiesta.test.chunkX=320
 -Dfiesta.test.chunkZ=320
@@ -104,15 +104,36 @@ For `outage`, also provide:
 
 To observe client chunk delivery, build the plugin with tests/e2e/build.sh and
 PAPER_TEST_CLASSPATH from the matching disposable Paper server. In outage mode,
-a joining test client is teleported to the target chunk. Keep the server alive
-after restore with -Dfiesta.test.keepAliveSeconds=10. Install this plugin only
-on the disposable server.
+a joining test client is teleported to the target chunk. The `cold` mode does
+not start a chunk request until a test client joins. Its teleport triggers the
+cold load, and the plugin logs time until the target chunk is loaded and checks
+the restored block. The client probe records elapsed time through receipt of
+the target chunk packet. Connect the test client after the server starts and
+wait for that packet in its results. Use a fresh `FIESTA_TEST_USERNAME` on
+each run so the client has no saved position near the cold region. Keep the
+server alive after the teleport with
+`-Dfiesta.test.keepAliveSeconds=10`. Install this plugin only on the disposable
+server.
 
 Install the client dependency with `npm ci` in `tests/e2e/client`, then run
-`node tests/e2e/client/probe.js /tmp/test/client-ready /tmp/test/client-results.log`.
+`FIESTA_TEST_USERNAME=TierProbeFresh node tests/e2e/client/probe.js /tmp/test/client-ready /tmp/test/client-results.log`.
 The probe reports the first chunk and target chunk packet with elapsed time. It
 connects to loopback port 25671 by default; set `FIESTA_TEST_HOST` and
 `FIESTA_TEST_PORT` to use another disposable endpoint.
+
+One disposable Oracle Paper run restored a marked region bundle from Luna over
+the real SFTP transport. With a fresh test username on a loopback client,
+Paper reported the target chunk ready 4.579 seconds after the join-triggered
+teleport. The client received its login packet 2.063 seconds after the probe
+started and the target chunk packet at 7.110 seconds, about 5.047 seconds after
+login. The restored gold-block check passed and the remote marker cleared.
+This measures a single disposable cold restore and packet delivery from a
+client on the Oracle host; it is not an external player route, a concurrent
+load test, or a production eviction result. A later attempt to republish the
+test bundle timed out after 180 seconds before any remote object was created;
+the SFTP connection answered a simple read-only probe afterward. Repeated
+publishing and restore reliability need more investigation before treating
+these timings as a service target.
 
 Configure the disposable restore command to exit `75` until the ready file
 exists. Once it exists, the command must restore the saved region and remove the
