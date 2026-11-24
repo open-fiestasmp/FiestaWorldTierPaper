@@ -295,6 +295,20 @@ Luna SFTP restore path after an unreachable configured endpoint, but it does
 not simulate Luna losing an active connection or measure a player's cold-load
 experience. Production eviction remains disabled.
 
+A further disposable Paper run exercised recovery after an actual Luna SSH
+restore stream was reset by a test-only TCP relay. The isolated test object was
+622,798 bytes under a 5 MB cap. Paper first retried with the test endpoint
+unavailable and loaded a separate saved local chunk. After the test route was
+enabled, the relay reset the SSH connection after 65,536 response bytes. The
+restore then failed closed with the marker intact and no local terrain file.
+After stopping and restarting only that Paper copy while the test endpoint was
+unavailable, the local chunk still loaded. Returning the test config to Luna
+restored the saved gold block, cleared the marker, and brought remote test
+usage back to zero. The E2E chunk request completed in 40.8 seconds across the
+outage, retry, and restart; this is not a player-login or end-to-end latency
+measurement. It does not simulate a Luna provider outage. Production eviction
+remains disabled.
+
 ## License
 
 GPL-3.0. The patch modifies Paper storage code; retain Paper's license notices

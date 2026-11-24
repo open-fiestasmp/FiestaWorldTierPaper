@@ -61,6 +61,19 @@ cleared and remote usage returned to zero. This tests retry after an unreachable
 configured endpoint followed by a real Luna SFTP restore. It does not interrupt
 an active Luna connection or measure a player's view of a cold chunk.
 
+A disposable Paper restart probe then used a private test config with a unique
+5 MB Luna root. The target region was 622,798 bytes. Paper first stayed on a
+closed test endpoint while an unrelated saved chunk loaded. The test switched
+to Luna through a TCP relay that reset the active SSH restore stream after
+65,536 response bytes. The marker remained and the local terrain file stayed
+absent. After that restore attempt unwound, the test stopped and restarted only
+the disposable Paper process while the test endpoint was closed. The separate
+local chunk loaded again; switching the test config back to Luna restored the
+saved gold block and cleared the marker. Remote test usage returned to zero.
+Paper's chunk future completed in 40.8 seconds across the outage and restart;
+this does not measure a player's login or view of a cold chunk, and the relay
+reset is not a Luna provider outage.
+
 [`check-restore-crash-restart.sh`](check-restore-crash-restart.sh) repeats the
 same marked-region setup, force-stops only its disposable Paper process while
 the restore is pending, and starts that world again. It checks that the marker
