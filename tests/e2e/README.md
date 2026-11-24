@@ -136,14 +136,34 @@ player-perceived latency test. Keep that delay in mind: cold regions are not
 instant, and automatic production eviction stays disabled until player-facing
 latency is measured and accepted.
 
-To repeat it, run the plugin once in `seed-rich` mode with the target chunk
-coordinates. Confirm the matching `r.x.z.mca` files in `region`, `entities`,
-and `poi`, plus a `.mcc` sidecar larger than 1 MiB. Copy those four files into a
-disposable remote fixture and record their SHA-256 hashes. Remove only those
-test-world files, write a `REMOTE_ONLY` marker, and run the plugin in
-`verify-rich` mode with a restore command that verifies the hashes, republishes
-all four files, and clears the marker. Keep the server, config, and fixture
-under `/tmp`; never point this test at Fiesta's live world.
+## Entity external sidecar
+
+`seed-entity-rich` saves a lectern POI and a persistent armor stand with a
+1,500,000-byte payload in its persistent data. Paper wrote
+`entities/c.320.320.mcc` at 1,501,233 bytes. After a clean server shutdown, a
+fresh Paper process ran `verify-entity-rich`, loaded the same entity chunk, and
+checked the payload and lectern. The callback took 818 ms, and the sidecar hash
+was unchanged across the restart.
+
+The companion store then collected the terrain, entity and POI `.mca` files
+plus the actual entity `.mcc`, published them to a local directory store, and
+restored all four with matching hashes. This verifies Paper's entity sidecar
+format and the bundle collector together. It does not send this Paper-generated
+sidecar to Luna. The OpenSSH/SFTP tests cover sidecars in each component with
+fixture files.
+
+To repeat the full component restore, run the plugin in `seed-rich` mode with
+the target chunk coordinates. Confirm the matching `r.x.z.mca` files in
+`region`, `entities`, and `poi`, plus the terrain `.mcc` sidecar larger than
+1 MiB. Copy those four files into a disposable remote fixture and record their
+SHA-256 hashes. Remove only those test-world files, write a `REMOTE_ONLY`
+marker, and run the plugin in `verify-rich` mode with a restore command that
+verifies the hashes, republishes all four files, and clears the marker.
+
+To repeat the entity sidecar check, run `seed-entity-rich`, let Paper shut down
+cleanly, then start the same disposable server in `verify-entity-rich` mode.
+Keep the server, config, and fixture under `/tmp`; never point either test at
+Fiesta's live world.
 
 ## Run it
 
@@ -151,7 +171,7 @@ Build the plugin against the Paper API matching the patched server, put its JAR
 in the disposable server's `plugins` directory, and run with:
 
 ```text
--Dfiesta.test.mode=seed|verify|outage|seed-rich|verify-rich
+-Dfiesta.test.mode=seed|verify|outage|seed-rich|verify-rich|seed-entity-rich|verify-entity-rich
 -Dfiesta.test.result=/path/in/the/disposable/test/root/result.txt
 -Dfiesta.test.chunkX=320
 -Dfiesta.test.chunkZ=320
