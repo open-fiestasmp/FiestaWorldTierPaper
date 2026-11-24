@@ -16,6 +16,9 @@ import org.bukkit.block.Barrel;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
@@ -25,6 +28,24 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class FiestaTierE2E extends JavaPlugin {
     @Override
     public void onEnable() {
+        Bukkit.getPluginManager().registerEvents(new Listener() {
+            @EventHandler
+            public void onPlayerJoin(final PlayerJoinEvent event) {
+                if (!"outage".equals(System.getProperty("fiesta.test.mode", ""))) {
+                    return;
+                }
+                final World world = Bukkit.getWorld("world");
+                if (world == null) {
+                    return;
+                }
+                final int chunkX = Integer.getInteger("fiesta.test.chunkX", 0);
+                final int chunkZ = Integer.getInteger("fiesta.test.chunkZ", 0);
+                final Location target = new Location(world, chunkX * 16 + 8, 100.0D, chunkZ * 16 + 8);
+                event.getPlayer().teleportAsync(target).thenAccept(success ->
+                    report(success ? "PLAYER_TELEPORTED_TO_TARGET" : "PLAYER_TELEPORT_FAILED")
+                );
+            }
+        }, this);
         Bukkit.getScheduler().runTaskLater(this, this::runProbe, 20L);
     }
 
@@ -167,7 +188,12 @@ public final class FiestaTierE2E extends JavaPlugin {
             finishFailure(mode, error);
         } finally {
             if (!deferredShutdown) {
-                Bukkit.shutdown();
+                final long keepAliveSeconds = Long.getLong("fiesta.test.keepAliveSeconds", 10L);
+                if (keepAliveSeconds > 0L) {
+                    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, keepAliveSeconds * 20L);
+                } else {
+                    Bukkit.shutdown();
+                }
             }
         }
     }

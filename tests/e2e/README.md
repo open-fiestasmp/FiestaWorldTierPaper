@@ -22,8 +22,18 @@ returned, the requested chunk's gold block loaded and the remote marker was
 removed. Paper rewrites region data when it saves the loaded chunk, so the
 post-shutdown region file is not a raw
 checksum comparison. The Python suite separately checks bundle checksums and
-publication rules. This test uses an injected temporary failure; it does not
-simulate Luna becoming unreachable or measure player-facing latency.
+publication rules. That earlier run used a local injected failure and did not observe the client.
+
+A follow-up disposable Paper 1.21.11 run held a marked region behind four
+retryable fixture attempts. Paper stayed up and loaded a separate saved local
+chunk during the wait. The test plugin sent a local client to the cold chunk;
+the client received the target chunk packet for 320,320 12.473 seconds after
+the client process started. Separately, Paper's cold-chunk request completed
+13.405 seconds after that request began. The fixture used a controlled
+five-second outage and a local file copy. The client timing includes its login
+and retry wait; neither measurement represents Luna SFTP or a player's route to
+Fiesta. The real Luna cold-load path still needs a connected-client
+measurement.
 
 A second disposable run used a restore command that always exited nonzero.
 Paper stopped on its unrecoverable chunk-system failure; the remote marker
@@ -91,6 +101,18 @@ For `outage`, also provide:
 -Dfiesta.test.restoreAvailable=/path/to/disposable/restore-ready
 -Dfiesta.test.outageMillis=5000
 ```
+
+To observe client chunk delivery, build the plugin with tests/e2e/build.sh and
+PAPER_TEST_CLASSPATH from the matching disposable Paper server. In outage mode,
+a joining test client is teleported to the target chunk. Keep the server alive
+after restore with -Dfiesta.test.keepAliveSeconds=10. Install this plugin only
+on the disposable server.
+
+Install the client dependency with `npm ci` in `tests/e2e/client`, then run
+`node tests/e2e/client/probe.js /tmp/test/client-ready /tmp/test/client-results.log`.
+The probe reports the first chunk and target chunk packet with elapsed time. It
+connects to loopback port 25671 by default; set `FIESTA_TEST_HOST` and
+`FIESTA_TEST_PORT` to use another disposable endpoint.
 
 Configure the disposable restore command to exit `75` until the ready file
 exists. Once it exists, the command must restore the saved region and remove the

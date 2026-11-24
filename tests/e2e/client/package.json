@@ -1,0 +1,11 @@
+{
+  "name": "fiesta-world-tier-player-probe",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "probe": "node probe.js"
+  },
+  "dependencies": {
+    "minecraft-protocol": "1.64.0"
+  }
+}

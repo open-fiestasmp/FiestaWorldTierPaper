@@ -264,14 +264,15 @@ exit. Automated stale-lock cleanup, a mid-file disconnect, and a Paper JVM
 crash remain untested.
 
 This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. An earlier synchronous outage probe stopped its
-disposable server. With the asynchronous retry patch, the disposable server
-kept ticking while the test restore command returned the temporary-failure
-status. A separate saved chunk loaded during the outage, then the original
-gold-block chunk loaded after the command became available. This checks
-Moonrise's retry path, not a real Luna outage or player-facing latency. A
-permanent restore failure left its marker in place and created no local region,
-but currently stops Paper. Production eviction remains disabled.
+world data was transferred. With the asynchronous retry patch, a disposable
+server stayed up while the restore command returned the temporary-failure
+status, and a separate saved chunk loaded. A local client then received the
+restored target chunk after a controlled outage: 12.473 seconds from client
+start. Paper's cold-chunk request completed 13.405 seconds after that request
+began. The test used a local file-copy fixture, not Luna SFTP, so actual
+cold-load latency from Luna remains unmeasured. A permanent restore failure
+leaves its marker in place and creates no local region, but still stops Paper.
+Production eviction remains disabled.
 
 ## License
 
