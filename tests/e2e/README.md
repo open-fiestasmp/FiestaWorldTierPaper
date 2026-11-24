@@ -81,6 +81,23 @@ test-world files, write a `REMOTE_ONLY` marker, and run the plugin in
 all four files, and clears the marker. Keep the server, config, and fixture
 under `/tmp`; never point this test at Fiesta's live world.
 
+### Paper restart during partial restore
+
+On 2026-11-24, a separate disposable run used the same four-member rich region
+bundle. A test-only restore command changed the marker to `RESTORING`, wrote
+only the first 8 KiB of the terrain file locally, and then waited. Paper was
+still running, the chunk request had not completed, and the entity, POI, and
+oversized-sidecar files were absent. The test then killed the Paper process and
+restore helper. The marker and partial terrain file remained.
+
+After Paper restarted, the helper checked the manifest and all four file hashes,
+staged and published the complete bundle, then cleared the marker. The
+`verify-rich` callback completed in 876 ms and checked the gold block, entity,
+lectern, barrel payload, region files, and oversized sidecar. This covers a
+process stop after partial terrain publication; it does not cover a crash at
+every individual file-publication step, Luna SFTP recovery, or player latency.
+It used disposable files under `/tmp` and did not touch Fiesta's live world.
+
 ## Run it
 
 Build the plugin against the Paper API matching the patched server, put its JAR
