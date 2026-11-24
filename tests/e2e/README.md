@@ -42,6 +42,16 @@ to restore the saved region, the gold block loaded and the marker cleared in
 that outage. Run it with [`check-restore-retry.sh`](check-restore-retry.sh).
 This checks a local test fixture, not a Luna outage or player-facing latency.
 
+The permanent-failure check leaves the fixture returning exit code `1` for a
+22-second observation window. Two runs on 2026-11-24 had five and six failed
+restore calls. Paper stayed running, loaded a separate saved local chunk, kept
+the remote marker, and did not create the missing terrain region. The cold
+chunk request remained pending until the disposable process was stopped. Run it with
+[`check-permanent-restore-pending.sh`](check-permanent-restore-pending.sh),
+using the same seeded marked-region setup and leaving the fixture's allow file
+absent. This checks that a permanent restore failure does not stop Paper or
+stall unrelated local chunk I/O; it does not measure player-facing behavior.
+
 [`check-restore-crash-restart.sh`](check-restore-crash-restart.sh) repeats the
 same marked-region setup, force-stops only its disposable Paper process while
 the restore is pending, and starts that world again. It checks that the marker

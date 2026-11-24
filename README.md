@@ -238,7 +238,7 @@ requests for one marked region run a single restore helper; it tests the
 restorer lock, not Paper's full chunk scheduler. A timeout fixture also checks
 that child processes stop while the remote marker and missing local region stay
 intact.
-The standalone Java fixtures pass, all 78 companion Python unit tests pass, and
+The standalone Java fixtures pass, all 80 companion Python unit tests pass, and
 a separate Linux fixture confirmed that Python observes the Java process lock
 with `fcntl.lockf`.
 
@@ -278,8 +278,13 @@ of the saved chunk after recovery. A forced process-stop probe confirmed that a
 marked region remained unavailable across restart and restored after the
 fixture recovered. The nonzero-exit outage probe kept Paper alive, loaded a
 nearby saved chunk, and restored the requested region after three fixture
-calls over 6.6 seconds. These tests do not reproduce a real Luna outage or
-measure player-facing latency. Production eviction remains disabled.
+calls over 6.6 seconds. Two separate 22-second permanent-failure probes kept
+the marker and missing local terrain intact, loaded an unrelated saved chunk,
+and kept Paper running through five and six failed restore attempts. The
+affected chunk request remained pending until the disposable server was
+stopped. These tests do not reproduce a real Luna outage or measure
+player-facing latency.
+Production eviction remains disabled.
 
 ## License
 
