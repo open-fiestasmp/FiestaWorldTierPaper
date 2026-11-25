@@ -273,6 +273,11 @@ separate local chunk, then loaded the saved region after the fixture recovered.
 This used a local fake journal and restore command, not Luna SFTP or production
 data.
 
+A separate disposable run forced Paper to stop while that markerless restore
+was pending, then restarted it with the same journal. Paper retried the restore
+and loaded the saved region after the local fixture recovered. No production
+data or services were involved.
+
 The manual Paper runtime probe and setup notes are in
 [`tests/e2e`](tests/e2e/README.md). It needs a private test configuration and
 must only be run against a disposable world and remote object root.
