@@ -266,6 +266,13 @@ localhost-only probe also exercised a permanent restore failure followed by a
 successful retry; see [`tests/e2e`](tests/e2e/README.md) for the results. The
 build and probe used temporary files and did not install or change Fiesta.
 
+On the same date, `tests/e2e/check-markerless-recovery.sh` passed against that
+build. With the region absent locally, no marker, and the test journal reporting
+`REMOTE`, Paper stayed up through three failed restore attempts, loaded a
+separate local chunk, then loaded the saved region after the fixture recovered.
+This used a local fake journal and restore command, not Luna SFTP or production
+data.
+
 The manual Paper runtime probe and setup notes are in
 [`tests/e2e`](tests/e2e/README.md). It needs a private test configuration and
 must only be run against a disposable world and remote object root.

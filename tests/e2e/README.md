@@ -73,6 +73,15 @@ terrain region appeared. This checks that a permanent restore failure does
 not stop Paper or stall unrelated local chunk I/O; it does not measure
 player-facing behavior.
 
+On 2026-11-25, `check-markerless-recovery.sh` tested journal lookup when the
+remote region had no marker and no local region file. Its local fixture reported
+`REMOTE`, then held restore at exit code `75`. Paper stayed up, loaded a
+separate saved local chunk, and made three failed restore attempts without
+creating terrain or a marker. After the fixture allowed restore, Paper loaded
+the saved gold block and shut down cleanly; the test reported 10 seconds to
+recover. The script uses a local file copy and fake journal/restore command in
+`/tmp`. It does not test Luna SFTP, a player connection, or production data.
+
 On 2026-11-25, two disposable Paper 1.21.11 cases checked permanent failure and
 recovery. After six failed restores, Paper remained up, loaded a saved local
 chunk, kept the remote marker, and left the terrain region absent. In the
@@ -224,6 +233,18 @@ For `outage`, also provide:
 -Dfiesta.test.restoreAvailable=/path/to/disposable/restore-ready
 -Dfiesta.test.outageMillis=5000
 ```
+
+To run the markerless journal recovery case, build the plugin against the same
+Paper source and run:
+
+```sh
+SERVER_JAR=/absolute/path/to/paper-bundler.jar \
+PLUGIN_JAR=/absolute/path/to/FiestaTierE2E.jar \
+  tests/e2e/check-markerless-recovery.sh
+```
+
+The script creates and removes its own disposable server under `/tmp`. Set
+`FIESTA_TEST_KEEP_ROOT=1` to keep the files after a run for inspection.
 
 ### Client chunk delivery
 
