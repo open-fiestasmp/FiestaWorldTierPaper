@@ -1,6 +1,6 @@
 928abd06fdd113256bd4ecb9534e73ee9b6bc5543e2a275e121dbdf764aef23c  paper-server/patches/features/0034-Restore-marked-remote-regions-before-treating-them-a.patch
 3bfac06f3295ab3030c0f4e1149ad62a3893d287d8efd346d8202b1c6a9cec1e  paper-server/patches/features/0035-Recover-interrupted-region-bundles-before-cache-use.patch
-fc3fa6a04beae625c911db0fad7322525258506bf5c9fdbea696fb87fe7951d0  paper-server/patches/features/0036-Fail-closed-on-world-tier-restore-failures.patch
+cee9e78a87014cfcc37f0638ab655ac3880561ec99b50794883db3b8c0f8b17f  paper-server/patches/features/0036-Fail-closed-on-world-tier-restore-failures.patch
 e9175ed9ae8b6ec5c7f07e8584fcb63a85fa397ad9b9020b0ac0cd277e088395  paper-server/patches/features/0037-Add-region-leases-for-safe-world-tiering.patch
 f55243d7dae8bc977ef857be9510cabca36780359b76dc417540753a06da54ed  paper-server/patches/features/0038-Add-leased-region-offload-bridge.patch
 c86a3e6bd9f0e76ac730390e53d58cc19c9b1d61a98cee8a93921012a0c94ea2  paper-server/patches/features/0039-Add-opt-in-idle-world-tier-budget-scheduler.patch

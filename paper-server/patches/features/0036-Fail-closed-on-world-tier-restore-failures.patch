@@ -4,9 +4,9 @@ Date: Thu, 19 Nov 2026 07:15:51 +0530
 Subject: [PATCH] Fail closed on world tier restore failures
 
 ---
- .../scheduling/task/ChunkLoadTask.java        | 29 ++++++++++++++++++-
- .../chunk/storage/RegionFileStorage.java      | 22 ++++++++++----
- 2 files changed, 45 insertions(+), 6 deletions(-)
+ .../scheduling/task/ChunkLoadTask.java        | 29 ++++++++++++++++++++++++++++-
+ .../chunk/storage/RegionFileStorage.java      | 23 ++++++++++++++++++------
+ 2 files changed, 45 insertions(+), 7 deletions(-)
 
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkLoadTask.java
 index 7463cf5..60c31da 100644
@@ -99,10 +99,10 @@ index 7463cf5..60c31da 100644
              }
  
 diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-index f82a725..0ee11d9 100644
+index 376ff223194689b0f359b653744414269daa8e97..eda8434befd697a78d3d3c02854aa8953202b051 100644
 --- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
 +++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
-@@ -107,12 +107,16 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -109,12 +109,16 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
          if (restoreRequired) {
              final RegionFile stale = this.regionCache.remove(key);
              if (stale != null) {
@@ -121,7 +121,7 @@ index f82a725..0ee11d9 100644
              }
              this.createRegionFile(key);
          }
-@@ -134,7 +138,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -136,7 +140,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
  
          if (!java.nio.file.Files.exists(regionPath)) {
              if (restoreRequired && this.folder.getFileName().toString().equals("region")) {
@@ -130,7 +130,7 @@ index f82a725..0ee11d9 100644
              }
              this.markNonExisting(key);
              return null;
-@@ -305,10 +309,14 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -309,13 +313,17 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
              if (restoreRequired) {
                  final RegionFile stale = this.regionCache.remove(key);
                  if (stale != null) {
@@ -141,23 +141,26 @@ index f82a725..0ee11d9 100644
 +                        throw new FiestaWorldTierRestoreException("Could not close cached region before Fiesta recovery", ex);
 +                    }
                  }
-                 if (!FiestaRegionRestorer.restoreIfMarked(this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z)) {
--                    throw new IOException("Marked Fiesta world-tier region was not restored before write: " + this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z)));
-+                    throw new FiestaWorldTierRestoreException("Marked Fiesta world-tier region was not restored before write: " + this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z)), null);
+                 if (!FiestaRegionRestorer.restoreIfMarked(
+                     this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z
+                 )) {
+-                    throw new IOException("Marked Fiesta world-tier region was not restored before write: "
+-                        + this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z)));
++                    throw new FiestaWorldTierRestoreException("Marked Fiesta world-tier region was not restored before write: "
++                        + this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z)), null);
                  }
                  this.createRegionFile(key);
              }
-@@ -324,6 +332,10 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -331,6 +339,9 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
  
              final Path regionPath = this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z));
  
 +            if (restoreRequired && this.folder.getFileName().toString().equals("region") && !java.nio.file.Files.exists(regionPath)) {
 +                throw new FiestaWorldTierRestoreException("Restored Fiesta world-tier terrain region is missing before write: " + regionPath, null);
 +            }
-+
-             this.createRegionFile(key);
  
-             FileUtil.createDirectoriesSafe(this.folder);
+             this.createRegionFile(key);
+             FiestaRegionRestorer.invalidate(this.folder, chunkPos.x, chunkPos.z); // Fiesta - clear cached journal state
+
 -- 
 2.53.0
-
