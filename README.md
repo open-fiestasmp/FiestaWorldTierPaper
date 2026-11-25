@@ -300,10 +300,12 @@ delete then succeeded. This covers manual recovery after a client process
 exit. Automated stale-lock cleanup, a mid-file disconnect, and a Paper JVM
 crash remain untested.
 
-This has not been installed on Fiesta or tested with a live world. No production
-world data was transferred. Disposable recovery tests check temporary and
-nonzero restore failures, keep the marker and missing local region intact, load
-unrelated saved chunks, and restore the requested saved chunk after recovery.
+The current PR revision has not been deployed to Fiesta. The live Paper JAR
+contains an earlier World Tier build, but the current server starts without the
+World Tier command, config, or scheduler properties. Disposable recovery tests
+check temporary and nonzero restore failures, keep the marker and missing local
+region intact, load unrelated saved chunks, and restore the requested saved
+chunk after recovery.
 The permanent-failure probe kept Paper running through repeated failures; the
 marked chunk stayed unavailable and its request remained pending. A forced
 process-stop probe also confirmed that a marked region stayed unavailable
@@ -326,11 +328,11 @@ latency result or a real Luna provider outage. A separate 180-second SFTP
 publish timeout remains unexplained, although two later bounded publishes
 succeeded.
 
-The patch has not been installed on Fiesta, no production world data moved, and
-production eviction remains disabled. The tests cover specific injected and
-disposable failure paths; they do not prove every crash boundary, quota or full-
-disk behavior, concurrent production load, or acceptable player-facing cold-
-load latency.
+Production eviction remains disabled, and the current production worlds have
+zero `REMOTE_ONLY` markers. The tests cover specific injected and disposable
+failure paths; they do not prove every crash boundary, quota or full-disk
+behavior, concurrent production load, or acceptable player-facing cold-load
+latency.
 
 ## License
 
