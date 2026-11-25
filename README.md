@@ -258,6 +258,14 @@ created its three dimensions, reached `Done`, and shut down cleanly. This checks
 startup only; the later saved-region and outage tests below exercise remote
 restore behavior. They still use disposable data, not production worlds.
 
+On 2026-11-25, a fresh worktree at the pinned Paper 1.21.11 base applied
+patches 0034–0041 and built `createMojmapBundlerJar`. The server JAR and its
+embedded server JAR both contained the access tracker, lease manager, tier
+scheduler, offloader, restorer, and restore-failure classes. A disposable
+localhost-only probe also exercised a permanent restore failure followed by a
+successful retry; see [`tests/e2e`](tests/e2e/README.md) for the results. The
+build and probe used temporary files and did not install or change Fiesta.
+
 The manual Paper runtime probe and setup notes are in
 [`tests/e2e`](tests/e2e/README.md). It needs a private test configuration and
 must only be run against a disposable world and remote object root.

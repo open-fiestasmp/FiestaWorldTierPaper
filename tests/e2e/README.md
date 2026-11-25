@@ -73,6 +73,14 @@ terrain region appeared. This checks that a permanent restore failure does
 not stop Paper or stall unrelated local chunk I/O; it does not measure
 player-facing behavior.
 
+On 2026-11-25, two disposable Paper 1.21.11 cases checked permanent failure and
+recovery. After six failed restores, Paper remained up, loaded a saved local
+chunk, kept the remote marker, and left the terrain region absent. In the
+recovery case, the fixture returned exit code `75` until enabled. Paper retried
+the pending chunk, restored its saved gold block after three attempts, and
+cleared the marker. Both cases used loopback and temporary world data; they do
+not measure player connections or production restore latency.
+
 A separate disposable integration run used a private test config and a unique
 Luna object root capped at 5 MB. After publishing a 622,798-byte saved region,
 the test config pointed Paper at a closed local port. Paper retried the marked
