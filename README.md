@@ -141,20 +141,20 @@ world-data target with one planning pass per hour can be configured with:
 -Dfiesta.worldTier.schedulerAllowOnline=true
 ```
 
-Online mode is opt-in. Each pass asks the companion CLI for up to eight oldest
-eligible bundles and tries them one at a time. Paper's exclusive lease rejects
+Scheduling offloads while players are online is opt-in. Each pass asks the
+companion CLI for up to eight oldest eligible bundles and tries them one at a
+time. Paper's exclusive lease rejects
 loaded or ticketed regions, while the CLI checks access age, local reserve, and
 Luna quota. With the default 30-day cold age, regions accessed during rollout
 will not be candidates until they have aged past that threshold. A player can
 use the local region during network upload; the access-age and source checks
-cancel eviction if the region was touched or changed. Demand restore still
-downloads a missing cold bundle when a player enters it. Its player-facing
-latency has not passed testing, so online mode is not enabled on Fiesta. The
-Paper scheduler passes the validated `cold_age_days` from the planner result to
-the leased offload API, keeping the final age check aligned with the CLI config.
-tick
-dispatch and invocation of the leased Paper API were exercised on a disposable
-Paper server with a fake CLI shim. Earlier asynchronous probes reported 23.2 s
+cancel eviction if the region was touched or changed. Demand restore downloads
+a missing cold bundle when a player enters it. Cold-load latency has not passed
+testing, so the scheduler remains disabled on Fiesta. The Paper scheduler
+passes the planner's validated `cold_age_days` to the leased offload API,
+keeping the final age check aligned with the CLI config. Scheduler tick dispatch
+and the leased API call were exercised on a disposable Paper server with a fake
+CLI shim. Earlier asynchronous probes reported 23.2 s
 and 15.4 s, but inspection of their saved Java harness showed they passed
 `generate=true`; those timings are not valid no-generation restore measurements
 and are not used as evidence here.
@@ -186,9 +186,8 @@ maximum tick gap was 61 ms. A separate 651 KiB saved region offloaded and
 restored with the gold block intact and marker cleared. Publish took 17.1 s
 and restore 8.5 s; without multiplexing, the same region took 41.0 s and
 29.8 s. This was an internal chunk request, not a player session, and the
-restore delay remains noticeable. This was an internal chunk request, not a
-player session. The later outage test below verifies asynchronous retry, but
-player-facing latency still needs validation. Test
+restore delay remains noticeable. The later outage test below verifies
+asynchronous retry, but player-facing latency still needs validation. Test
 roots were removed; Fiesta's live worlds were untouched.
 
 A follow-up direct SFTP benchmark downloaded the same 651 KiB synthetic region
