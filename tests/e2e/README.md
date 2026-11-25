@@ -82,6 +82,12 @@ the saved gold block and shut down cleanly; the test reported 10 seconds to
 recover. The script uses a local file copy and fake journal/restore command in
 `/tmp`. It does not test Luna SFTP, a player connection, or production data.
 
+The same test passed again on 2026-11-25 against a fresh bundler built from PR
+head `86fde41`. Paper stayed up through three simulated restore failures, loaded
+the separate saved chunk, and loaded the saved gold block after the fixture
+allowed recovery. This repeated run still used a local fake journal and file
+copy; it does not exercise Luna SFTP or a player connection.
+
 A second disposable case forced a Paper process stop while the same markerless
 restore was pending. Two restore attempts failed before the stop. After restart,
 Paper retried the journal lookup, kept the terrain file and marker absent, and

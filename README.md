@@ -278,6 +278,10 @@ separate local chunk, then loaded the saved region after the fixture recovered.
 This used a local fake journal and restore command, not Luna SFTP or production
 data.
 
+The check passed again against a fresh bundler built from PR head `86fde41`.
+Paper stayed up through three simulated failures, loaded the separate local
+chunk, then recovered the saved region after the fixture became available.
+
 A separate disposable run forced Paper to stop while that markerless restore
 was pending, then restarted it with the same journal. Paper retried the restore
 and loaded the saved region after the local fixture recovered. No production
