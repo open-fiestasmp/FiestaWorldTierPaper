@@ -21,18 +21,19 @@ public final class FiestaRegionRestorerMarkerTest {
         final Path marker = markerDirectory.resolve("r.0.0.json");
 
         Files.writeString(terrain, "local terrain survives");
-        check(!FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0), "unmarked local region should not restore");
+        check(!FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+            "unmarked local region should not restore");
 
         for (final String state : new String[] {"REMOTE_ONLY", "EVICTING", "RESTORING"}) {
             Files.writeString(marker, "{\"state\":\"" + state + "\"}\n");
-            check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
+            check(FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
                 state + " must trigger recovery when local terrain exists");
             check(state.equals(FiestaRegionRestorer.markerState(marker)),
                 state + " marker state must pass validation");
         }
 
         Files.writeString(marker, "{invalid marker}\n");
-        check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
+        check(FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
             "invalid markers must fail closed");
         boolean typedRestoreFailure = false;
         try {
@@ -52,7 +53,8 @@ public final class FiestaRegionRestorerMarkerTest {
             "wrapped tier restore failures must remain identifiable");
 
         Files.delete(marker);
-        check(!FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0), "removed marker should allow local data");
+        check(!FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+            "removed marker should allow local data");
 
         Files.delete(terrain);
         check(!FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0),
@@ -65,7 +67,7 @@ public final class FiestaRegionRestorerMarkerTest {
             Files.delete(markerDirectory.getParent());
             Files.writeString(dimension.resolve(".world-tier"), "not a directory");
         }
-        check(FiestaRegionRestorer.needsRestore(regionDirectory, 0, 0),
+        check(FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
             "an unreadable marker path must force recovery");
         typedRestoreFailure = false;
         try {
@@ -86,7 +88,129 @@ public final class FiestaRegionRestorerMarkerTest {
         }
         checkConcurrentRestore();
         checkRestoreTimeoutKillsChildren();
+        checkOffloadRequiresJournalLookup();
+        checkJournalRecoveryWithoutMarker();
         System.out.println("FiestaRegionRestorer marker fixture passed");
+    }
+
+    private static void checkOffloadRequiresJournalLookup() throws Exception {
+        final Path dimension = Files.createTempDirectory("fiesta-offload-journal-guard-");
+        final String oldLookup = System.getProperty("fiesta.worldTier.journalLookupEnabled");
+        System.clearProperty("fiesta.worldTier.journalLookupEnabled");
+        try {
+            boolean snapshotBlocked = false;
+            try {
+                FiestaRegionOffloader.snapshot(dimension, "minecraft:overworld", 0, 0, "test");
+            } catch (final IOException expected) {
+                snapshotBlocked = expected.getMessage().contains("journal lookup");
+            }
+            check(snapshotBlocked, "offload snapshot must require journal lookup");
+
+            boolean finalizationBlocked = false;
+            try {
+                FiestaRegionOffloader.finalizeOffload(
+                    dimension, "minecraft:overworld", 0, 0, "test", "a".repeat(64)
+                );
+            } catch (final IOException expected) {
+                finalizationBlocked = expected.getMessage().contains("journal lookup");
+            }
+            check(finalizationBlocked, "offload finalization must require journal lookup");
+        } finally {
+            restoreProperty("fiesta.worldTier.journalLookupEnabled", oldLookup);
+            Files.deleteIfExists(dimension);
+        }
+    }
+
+    private static void checkJournalRecoveryWithoutMarker() throws Exception {
+        final Path dimension = Files.createTempDirectory("fiesta-journal-recovery-");
+        final Path regionDirectory = Files.createDirectories(dimension.resolve("region"));
+        final Path config = Files.writeString(dimension.resolve("config.json"), "{}\n");
+        final Path journalState = Files.writeString(dimension.resolve("journal-state"), "UNTRACKED\n");
+        final Path command = dimension.resolve("world-tier-command.sh");
+        final String script = "#!/bin/sh\n"
+            + "set -eu\n"
+            + "operation=$1; shift\n"
+            + "dimension_root=\nregion_x=\nregion_z=\n"
+            + "while [ \"$#\" -gt 0 ]; do\n"
+            + "  case \"$1\" in\n"
+            + "    --dimension-root) dimension_root=$2; shift 2 ;;\n"
+            + "    --region-x) region_x=$2; shift 2 ;;\n"
+            + "    --region-z) region_z=$2; shift 2 ;;\n"
+            + "    *) shift ;;\n"
+            + "  esac\n"
+            + "done\n"
+            + "case \"$operation\" in\n"
+            + "  region-state) cat '" + journalState + "' ;;\n"
+            + "  recover-region)\n"
+            + "    case \"$(cat '" + journalState + "')\" in\n"
+            + "      UNTRACKED) printf 'UNTRACKED\\n' ;;\n"
+            + "      REMOTE) printf 'saved region\\n' > \"$dimension_root/region/r.$region_x.$region_z.mca\"; printf 'LOCAL\\n' ;;\n"
+            + "      *) exit 1 ;;\n"
+            + "    esac\n"
+            + "    ;;\n"
+            + "  *) exit 2 ;;\n"
+            + "esac\n";
+        Files.writeString(command, script);
+        Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwx------"));
+
+        final String oldCommand = System.getProperty("fiesta.worldTier.command");
+        final String oldConfig = System.getProperty("fiesta.worldTier.config");
+        final String oldLookup = System.getProperty("fiesta.worldTier.journalLookupEnabled");
+        System.setProperty("fiesta.worldTier.command", command.toString());
+        System.setProperty("fiesta.worldTier.config", config.toString());
+        System.setProperty("fiesta.worldTier.journalLookupEnabled", "true");
+        try {
+            check(!FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+                "an untracked missing region should remain eligible for normal generation");
+            check(!FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0),
+                "an untracked missing region should not be treated as restored");
+
+            Files.writeString(journalState, "REMOTE\n");
+            FiestaRegionRestorer.invalidate(regionDirectory, 0, 0);
+            check(FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+                "a journaled remote region must restore when its marker is missing");
+            check(FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0),
+                "journal recovery should publish the missing local terrain");
+            check(Files.readString(regionDirectory.resolve("r.0.0.mca")).equals("saved region\n"),
+                "journal recovery must preserve the remote terrain bytes");
+
+            Files.delete(regionDirectory.resolve("r.0.0.mca"));
+            Files.writeString(journalState, "TRACKED_MISSING\n");
+            FiestaRegionRestorer.invalidate(regionDirectory, 0, 0);
+            check(FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+                "a tracked local region with missing terrain must fail closed");
+            boolean failedClosed = false;
+            try {
+                FiestaRegionRestorer.restoreIfMarked(regionDirectory, "minecraft:overworld", 0, 0);
+            } catch (final FiestaWorldTierRestoreException expected) {
+                failedClosed = true;
+            }
+            check(failedClosed, "missing tracked terrain must not fall through to empty-region creation");
+            check(!Files.exists(regionDirectory.resolve("r.0.0.mca")),
+                "failed journal recovery must not create replacement terrain");
+        } finally {
+            restoreProperty("fiesta.worldTier.command", oldCommand);
+            restoreProperty("fiesta.worldTier.config", oldConfig);
+            restoreProperty("fiesta.worldTier.journalLookupEnabled", oldLookup);
+            clearJournalStateCache(regionDirectory);
+            try (var paths = Files.walk(dimension)) {
+                for (final Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
+        }
+    }
+
+    private static void restoreProperty(final String key, final String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, value);
+        }
+    }
+
+    private static void clearJournalStateCache(final Path regionDirectory) throws IOException {
+        FiestaRegionRestorer.invalidate(regionDirectory, 0, 0);
     }
 
     private static void checkConcurrentRestore() throws Exception {

@@ -86,6 +86,7 @@ needed):
 ```text
 -Dfiesta.worldTier.command=/usr/local/bin/fiesta-world-tier
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
+-Dfiesta.worldTier.journalLookupEnabled=true
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
 -Dfiesta.worldTier.offloadTimeoutSeconds=3600
 -Dfiesta.worldTier.accessWriteIntervalMillis=60000
@@ -105,7 +106,15 @@ after interrupted local deletion or restore. Before download, the command
 durably changes the marker to `RESTORING`; Paper retries that state even if
 partial local files exist. A complete, checksum-verified bundle is published
 before the marker and remote object are removed. Restore failures propagate as
-I/O errors and never become empty-region reads.
+I/O errors and never become empty-region reads. With journal lookup enabled,
+Paper also checks the local tier journal when a marker is absent. This lets it
+recover a remote region if its marker directory was lost, while a tracked local
+region whose terrain is missing fails closed and an untracked region remains
+eligible for normal generation. Keep this property enabled before any region
+is evicted. Run `fiesta-world-tier catalog` with the world-tier config before
+enabling it to create the journal and initialize local region history. Paper
+refuses to start an offload snapshot or finalize eviction if journal lookup is
+disabled.
 
 ## Scope and verification
 
@@ -230,7 +239,8 @@ cancelled waiters do not block progress, the process lease excludes another
 file lock, `REMOTE_ONLY`, `EVICTING`, and
 `RESTORING` markers force recovery when terrain exists, invalid markers fail
 closed, unreadable or malformed marker paths fail closed without creating a
-local terrain region, and the tier-failure type remains detectable through
+local terrain region, journal-backed recovery works without a marker, tracked
+missing terrain fails closed, and the tier-failure type remains detectable through
 wrapped exceptions. An isolated checkout at the pinned Fiesta base built
 `createMojmapBundlerJar` with the asynchronous retry and retry-log changes; the
 compiled server JAR contains the restore, lease, offload, access-tracker, and

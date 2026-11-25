@@ -13,7 +13,7 @@ diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/ne
      public synchronized final RegionFile moonrise$getRegionFileIfExists(final int chunkX, final int chunkZ) throws IOException {
          final long key = ChunkPos.asLong(chunkX >> REGION_SHIFT, chunkZ >> REGION_SHIFT);
  
-+        final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, chunkX, chunkZ); // Fiesta - remote region restore
++        final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, this.info.dimension().identifier().toString(), chunkX, chunkZ); // Fiesta - remote region restore
 +        if (restoreRequired) {
 +            final RegionFile stale = this.regionCache.remove(key);
 +            if (stale != null) {
@@ -52,7 +52,7 @@ diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/ne
          synchronized (this) {
              final long key = ChunkPos.asLong(chunkPos.x >> REGION_SHIFT, chunkPos.z >> REGION_SHIFT);
  
-+            final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, chunkPos.x, chunkPos.z);
++            final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z);
 +            if (restoreRequired) {
 +                final RegionFile stale = this.regionCache.remove(key);
 +                if (stale != null) {

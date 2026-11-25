@@ -13,7 +13,7 @@ index 1e9e061ec694ad64fc2724b83a66dfec7e069a43..6d21d8cd7f1bf44d2fc541480a7c78d8
      @Override
      public final boolean moonrise$doesRegionFileNotExistNoIO(final int chunkX, final int chunkZ) {
 -        return !this.doesRegionFilePossiblyExist(ChunkPos.asLong(chunkX >> REGION_SHIFT, chunkZ >> REGION_SHIFT));
-+        return !FiestaRegionRestorer.needsRestore(this.folder, chunkX, chunkZ)
++        return !FiestaRegionRestorer.needsRestore(this.folder, this.info.dimension().identifier().toString(), chunkX, chunkZ)
 +            && !this.doesRegionFilePossiblyExist(ChunkPos.asLong(chunkX >> REGION_SHIFT, chunkZ >> REGION_SHIFT)); // Fiesta - remote region restore
      }
  
@@ -23,7 +23,7 @@ index 1e9e061ec694ad64fc2724b83a66dfec7e069a43..6d21d8cd7f1bf44d2fc541480a7c78d8
          }
  
 -        if (!this.doesRegionFilePossiblyExist(key)) {
-+        final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, chunkX, chunkZ); // Fiesta - remote region restore
++        final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, this.info.dimension().identifier().toString(), chunkX, chunkZ); // Fiesta - remote region restore
 +        if (!restoreRequired && !this.doesRegionFilePossiblyExist(key)) {
              return null;
          }
@@ -44,11 +44,11 @@ index 1e9e061ec694ad64fc2724b83a66dfec7e069a43..6d21d8cd7f1bf44d2fc541480a7c78d8
              this.markNonExisting(key);
              return null;
          }
-@@ -294,6 +304,16 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+@@ -294,6 +304,17 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
  
              final Path regionPath = this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z));
  
-+            final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, chunkPos.x, chunkPos.z);
++            final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z);
 +            if (restoreRequired) {
 +                if (!FiestaRegionRestorer.restoreIfMarked(this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z)) {
 +                    throw new IOException("Marked Fiesta world-tier region was not restored before write: " + regionPath);
@@ -59,5 +59,6 @@ index 1e9e061ec694ad64fc2724b83a66dfec7e069a43..6d21d8cd7f1bf44d2fc541480a7c78d8
 +            }
 +
              this.createRegionFile(key);
++            FiestaRegionRestorer.invalidate(this.folder, chunkPos.x, chunkPos.z); // Fiesta - clear cached journal state
  
              FileUtil.createDirectoriesSafe(this.folder);

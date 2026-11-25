@@ -8,6 +8,20 @@ returning no data, or creating a new region. It also checks the marker before
 trusting Moonrise's negative cache. Any marker triggers recovery, because a
 surviving terrain `.mca` does not prove that the entity, POI, or oversized chunk
 files survived an interrupted eviction.
+
+Before enabling any offload, set
+`-Dfiesta.worldTier.journalLookupEnabled=true` and install the matching
+companion CLI. When a marker is absent, Paper consults the durable region
+journal before treating a missing region as new. Journaled remote regions are
+restored even if their marker was lost; journaled local regions with missing
+terrain fail closed. A region absent from the journal remains eligible for
+normal world generation. The lookup is cached for local and untracked regions,
+then cleared when Paper creates or offloads the region.
+Run `fiesta-world-tier catalog --config /etc/fiesta-world-tier/config.json`
+before enabling this JVM property so the journal exists and local region
+history is initialized. Keep the journal with the world-tier config and include
+it in backups. Paper refuses to start an offload snapshot or finalize eviction
+while journal lookup is disabled.
 The child receives an argument vector (no shell), a minimal environment, a
 bounded timeout, and a private configuration path. A failed restore is marked
 with a dedicated I/O exception. Moonrise preserves that exception through the
@@ -45,6 +59,7 @@ command/config paths and timeout can be overridden with these JVM properties:
 ```text
 -Dfiesta.worldTier.command=/usr/local/bin/fiesta-world-tier
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
+-Dfiesta.worldTier.journalLookupEnabled=true
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
 -Dfiesta.worldTier.offloadTimeoutSeconds=3600
 -Dfiesta.worldTier.accessWriteIntervalMillis=60000
@@ -77,6 +92,11 @@ state even if some local files exist, so an interrupted eviction or multi-file
 restore cannot be mistaken for a complete bundle. Paper closes any cached
 region handle before invoking recovery, then opens a fresh handle only after
 full-bundle verification.
+
+When the marker is missing, the `region-state` command performs a read-only
+journal lookup. The `recover-region` command uses that state to restore a remote
+bundle, reject missing terrain recorded as local, or allow an untracked region
+to follow normal generation. A missing or unreadable journal fails closed.
 
 ## Scope and current safety boundary
 

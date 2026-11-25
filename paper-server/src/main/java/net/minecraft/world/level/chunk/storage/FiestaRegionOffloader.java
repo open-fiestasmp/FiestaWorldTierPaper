@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 public final class FiestaRegionOffloader {
     private static final String COMMAND_PROPERTY = "fiesta.worldTier.command";
     private static final String CONFIG_PROPERTY = "fiesta.worldTier.config";
+    private static final String JOURNAL_LOOKUP_PROPERTY = "fiesta.worldTier.journalLookupEnabled";
     private static final String TIMEOUT_PROPERTY = "fiesta.worldTier.offloadTimeoutSeconds";
     private static final String DEFAULT_COMMAND = "/usr/local/bin/fiesta-world-tier";
     private static final String DEFAULT_CONFIG = "/etc/fiesta-world-tier/config.json";
@@ -26,6 +27,7 @@ public final class FiestaRegionOffloader {
 
     public static void snapshot(final Path dimensionRoot, final String dimensionKey, final int regionX,
                                 final int regionZ, final String snapshotId) throws IOException {
+        requireJournalLookupEnabled();
         final Path root = checkedRoot(dimensionRoot);
         final List<String> arguments = operation("snapshot-offload", dimensionKey, regionX, regionZ, snapshotId);
         arguments.add("--dimension-root");
@@ -47,6 +49,7 @@ public final class FiestaRegionOffloader {
     public static void finalizeOffload(final Path dimensionRoot, final String dimensionKey, final int regionX,
                                       final int regionZ, final String snapshotId, final String manifestHash)
         throws IOException {
+        requireJournalLookupEnabled();
         final Path root = checkedRoot(dimensionRoot);
         if (!MANIFEST_HASH.matcher(manifestHash).matches()) {
             throw new IOException("Invalid Fiesta world-tier manifest checksum");
@@ -67,6 +70,13 @@ public final class FiestaRegionOffloader {
         final Path terrain = root.resolve("region").resolve("r." + regionX + "." + regionZ + ".mca");
         if (Files.exists(terrain, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("Fiesta world-tier finalization left the local terrain region in place: " + terrain);
+        }
+        FiestaRegionRestorer.invalidate(root.resolve("region"), regionX << 5, regionZ << 5);
+    }
+
+    private static void requireJournalLookupEnabled() throws IOException {
+        if (!Boolean.parseBoolean(System.getProperty(JOURNAL_LOOKUP_PROPERTY, "false"))) {
+            throw new IOException("Fiesta world-tier offload requires journal lookup to be enabled");
         }
     }
 
