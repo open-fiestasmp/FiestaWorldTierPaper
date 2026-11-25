@@ -32,7 +32,7 @@ final class FiestaRegionRestorer {
     private static final Pattern MARKER_STATE = Pattern.compile("\\\"state\\\"\\s*:\\s*\\\"(REMOTE_ONLY|EVICTING|RESTORING)\\\"");
     private static final Object[] LOCKS = new Object[256];
     private static final Map<Path, RestoreRetryState> RETRIES = new ConcurrentHashMap<>();
-    private static final Map<Path, String> JOURNAL_STATES = new ConcurrentHashMap<>();
+    private static final Map<Path, String> REGION_STATES = new ConcurrentHashMap<>();
 
     static {
         for (int i = 0; i < LOCKS.length; ++i) {
@@ -51,15 +51,17 @@ final class FiestaRegionRestorer {
      * remote regions whose marker path has disappeared.
      */
     static boolean needsRestore(final Path storageFolder, final String dimensionKey, final int chunkX, final int chunkZ) {
+        Path marker = null;
         try {
-            final Path marker = markerPath(storageFolder, chunkX, chunkZ);
+            marker = markerPath(storageFolder, chunkX, chunkZ);
             if (markerAttributesOrNull(marker) == null) {
                 if (!worldTierConfigured()) {
+                    REGION_STATES.put(marker, "NO_MARKER");
                     return false;
                 }
                 final Path terrainRegion = terrainRegionPath(storageFolder, chunkX, chunkZ);
                 final BasicFileAttributes terrain = attributesOrNull(terrainRegion);
-                final String cachedState = JOURNAL_STATES.get(marker);
+                final String cachedState = REGION_STATES.get(marker);
                 if ("LOCAL".equals(cachedState) && terrain != null && terrain.isRegularFile()) {
                     return false;
                 }
@@ -67,23 +69,35 @@ final class FiestaRegionRestorer {
                     return false;
                 }
                 if (cachedState != null) {
-                    JOURNAL_STATES.remove(marker, cachedState);
+                    REGION_STATES.remove(marker, cachedState);
                 }
                 final String state = runJournalCommand(
                     storageFolder, dimensionKey, chunkX, chunkZ, "region-state", STATE_TIMEOUT_SECONDS
                 );
                 if ("LOCAL".equals(state) || "UNTRACKED".equals(state)) {
-                    JOURNAL_STATES.put(marker, state);
+                    REGION_STATES.put(marker, state);
                     return false;
                 }
                 return true;
             }
+            REGION_STATES.remove(marker);
             markerState(marker); // validate the durable state before entering recovery
-            JOURNAL_STATES.remove(marker);
             return true;
         } catch (final IOException | RuntimeException ignored) {
+            if (marker != null) {
+                REGION_STATES.remove(marker);
+            }
             // Force the normal I/O path, where the invalid storage path becomes
             // a visible IOException rather than a cached "no region" result.
+            return true;
+        }
+    }
+
+    static boolean needsRestoreNoIO(final Path storageFolder, final int chunkX, final int chunkZ) {
+        try {
+            final String state = REGION_STATES.get(markerPath(storageFolder, chunkX, chunkZ));
+            return worldTierConfigured() ? !"UNTRACKED".equals(state) : !"NO_MARKER".equals(state);
+        } catch (final IOException | RuntimeException ignored) {
             return true;
         }
     }
@@ -147,17 +161,17 @@ final class FiestaRegionRestorer {
                     );
                     if ("UNTRACKED".equals(state)) {
                         RETRIES.remove(marker, retry);
-                        JOURNAL_STATES.put(marker, state);
+                        REGION_STATES.put(marker, state);
                         return localTerrainReady(terrainRegion);
                     }
                     if (!"LOCAL".equals(state) || !localTerrainReady(terrainRegion)) {
                         throw new IOException("Journal recovery did not restore local terrain for " + regionName);
                     }
-                    JOURNAL_STATES.remove(marker);
+                    REGION_STATES.remove(marker);
                     RETRIES.remove(marker, retry);
                     return true;
                 }
-                JOURNAL_STATES.remove(marker);
+                REGION_STATES.remove(marker);
                 markerState(marker);
                 final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
                 if (localTerrain != null && !localTerrain.isRegularFile()) {
@@ -243,7 +257,7 @@ final class FiestaRegionRestorer {
     }
 
     static void invalidate(final Path storageFolder, final int chunkX, final int chunkZ) throws IOException {
-        JOURNAL_STATES.remove(markerPath(storageFolder, chunkX, chunkZ));
+        REGION_STATES.remove(markerPath(storageFolder, chunkX, chunkZ));
     }
 
     private static Path terrainRegionPath(final Path storageFolder, final int chunkX, final int chunkZ) throws IOException {

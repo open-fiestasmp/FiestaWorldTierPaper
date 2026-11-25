@@ -59,6 +59,7 @@ public final class FiestaRegionOffloader {
         arguments.add(root.toString());
         arguments.add("--manifest-sha256");
         arguments.add(manifestHash);
+        FiestaRegionRestorer.invalidate(root.resolve("region"), regionX << 5, regionZ << 5);
         run(arguments, false);
 
         final Path marker = root.resolve(".world-tier").resolve("remote")

@@ -16,7 +16,9 @@ journal before treating a missing region as new. Journaled remote regions are
 restored even if their marker was lost; journaled local regions with missing
 terrain fail closed. A region absent from the journal remains eligible for
 normal world generation. The lookup is cached for local and untracked regions,
-then cleared when Paper creates or offloads the region.
+then cleared when Paper creates or offloads the region. Moonrise's no-I/O
+negative-cache check reads only this in-memory classification; an unknown region
+stays possibly present until the regular I/O path checks its marker or journal.
 Run `fiesta-world-tier catalog --config /etc/fiesta-world-tier/config.json`
 before enabling this JVM property so the journal exists and local region
 history is initialized. Keep the journal with the world-tier config and include

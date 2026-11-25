@@ -76,10 +76,7 @@ index a20469532aecc0d8c8124347490df6c2b4c04e49..376ff223194689b0f359b65374441426
              RegionFile ret = this.regionCache.getAndMoveToFirst(key);
              if (ret != null) {
                  return ret;
-@@ -304,15 +331,6 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
- 
-             final Path regionPath = this.folder.resolve(getRegionFileName(chunkPos.x, chunkPos.z));
- 
+@@ -307,12 +334,3 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
 -            final boolean restoreRequired = FiestaRegionRestorer.needsRestore(this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z);
 -            if (restoreRequired) {
 -                if (!FiestaRegionRestorer.restoreIfMarked(this.folder, this.info.dimension().identifier().toString(), chunkPos.x, chunkPos.z)) {
@@ -89,6 +86,7 @@ index a20469532aecc0d8c8124347490df6c2b4c04e49..376ff223194689b0f359b65374441426
 -                    throw new IOException("Restored Fiesta world-tier terrain region is missing before write: " + regionPath);
 -                }
 -            }
- 
+-
++            FiestaRegionRestorer.invalidate(this.folder, chunkPos.x, chunkPos.z);
              this.createRegionFile(key);
              FiestaRegionRestorer.invalidate(this.folder, chunkPos.x, chunkPos.z); // Fiesta - clear cached journal state

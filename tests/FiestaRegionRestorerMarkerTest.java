@@ -89,6 +89,7 @@ public final class FiestaRegionRestorerMarkerTest {
         checkConcurrentRestore();
         checkRestoreTimeoutKillsChildren();
         checkOffloadRequiresJournalLookup();
+        checkNoIoJournalLookup();
         checkJournalRecoveryWithoutMarker();
         System.out.println("FiestaRegionRestorer marker fixture passed");
     }
@@ -118,6 +119,83 @@ public final class FiestaRegionRestorerMarkerTest {
         } finally {
             restoreProperty("fiesta.worldTier.journalLookupEnabled", oldLookup);
             Files.deleteIfExists(dimension);
+        }
+    }
+
+    private static void checkNoIoJournalLookup() throws Exception {
+        final Path dimension = Files.createTempDirectory("fiesta-no-io-journal-");
+        final Path regionDirectory = Files.createDirectories(dimension.resolve("region"));
+        final Path config = Files.writeString(dimension.resolve("config.json"), "{}\n");
+        final Path calls = dimension.resolve("calls.log");
+        final Path command = dimension.resolve("world-tier-command.sh");
+        Files.writeString(command, "#!/bin/sh\n"
+            + "set -eu\n"
+            + "operation=$1; shift\n"
+            + "dimension_root=\nregion_x=\nregion_z=\n"
+            + "while [ \"$#\" -gt 0 ]; do\n"
+            + "  case \"$1\" in\n"
+            + "    --dimension-root) dimension_root=$2; shift 2 ;;\n"
+            + "    --region-x) region_x=$2; shift 2 ;;\n"
+            + "    --region-z) region_z=$2; shift 2 ;;\n"
+            + "    *) shift ;;\n"
+            + "  esac\n"
+            + "done\n"
+            + "case \"$operation\" in\n"
+            + "  region-state) printf 'called\\n' >> '" + calls + "'; printf 'UNTRACKED\\n' ;;\n"
+            + "  finalize-offload-snapshot)\n"
+            + "    mkdir -p \"$dimension_root/.world-tier/remote\"\n"
+            + "    rm \"$dimension_root/region/r.$region_x.$region_z.mca\"\n"
+            + "    printf '{\"state\":\"REMOTE_ONLY\"}\\n' > \"$dimension_root/.world-tier/remote/r.$region_x.$region_z.json\"\n"
+            + "    ;;\n"
+            + "  *) exit 2 ;;\n"
+            + "esac\n");
+        Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwx------"));
+
+        final String oldCommand = System.getProperty("fiesta.worldTier.command");
+        final String oldConfig = System.getProperty("fiesta.worldTier.config");
+        final String oldLookup = System.getProperty("fiesta.worldTier.journalLookupEnabled");
+        System.setProperty("fiesta.worldTier.command", command.toString());
+        System.setProperty("fiesta.worldTier.config", config.toString());
+        System.setProperty("fiesta.worldTier.journalLookupEnabled", "true");
+        try {
+            check(FiestaRegionRestorer.needsRestoreNoIO(regionDirectory, 0, 0),
+                "an uncached region must stay possible until journal lookup runs on the I/O path");
+            check(!Files.exists(calls), "the no-I/O lookup must not start the companion process");
+            check(!FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+                "the journal I/O path should identify an untracked region");
+            check(!FiestaRegionRestorer.needsRestoreNoIO(regionDirectory, 0, 0),
+                "a cached untracked region may be reported absent without another process");
+
+            final Path marker = dimension.resolve(".world-tier/remote/r.0.0.json");
+            Files.writeString(regionDirectory.resolve("r.0.0.mca"), "local region\n");
+            FiestaRegionOffloader.finalizeOffload(
+                dimension, "minecraft:overworld", 0, 0, "test", "a".repeat(64)
+            );
+            check(!Files.exists(regionDirectory.resolve("r.0.0.mca")),
+                "offload finalization should remove the local terrain file");
+            check(Files.isRegularFile(marker), "offload finalization should publish the remote marker");
+            check(FiestaRegionRestorer.needsRestoreNoIO(regionDirectory, 0, 0),
+                "offload finalization must invalidate a cached untracked state");
+
+            Files.delete(marker);
+            restoreProperty("fiesta.worldTier.journalLookupEnabled", "false");
+            FiestaRegionRestorer.invalidate(regionDirectory, 0, 0);
+            check(FiestaRegionRestorer.needsRestoreNoIO(regionDirectory, 0, 0),
+                "an uncached marker state must stay possible until the normal I/O lookup checks it");
+            check(!FiestaRegionRestorer.needsRestore(regionDirectory, "minecraft:overworld", 0, 0),
+                "the non-tier path should cache an absent marker after checking it");
+            check(!FiestaRegionRestorer.needsRestoreNoIO(regionDirectory, 0, 0),
+                "the no-I/O path may trust the cached absent-marker result");
+        } finally {
+            restoreProperty("fiesta.worldTier.command", oldCommand);
+            restoreProperty("fiesta.worldTier.config", oldConfig);
+            restoreProperty("fiesta.worldTier.journalLookupEnabled", oldLookup);
+            FiestaRegionRestorer.invalidate(regionDirectory, 0, 0);
+            try (var paths = Files.walk(dimension)) {
+                for (final Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
         }
     }
 

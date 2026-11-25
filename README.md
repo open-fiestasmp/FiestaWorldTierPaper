@@ -9,7 +9,9 @@ The implementation consists of eight ordered Paper patches and six small Java
 helpers:
 
 - `paper-server/patches/features/0034-...patch` checks cold-region markers
-  before Moonrise's negative cache.
+  before Moonrise's negative cache. Moonrise's no-I/O path reads only the
+  in-memory region classification; unknown regions remain possible until the
+  normal I/O path checks the marker or journal.
 - `paper-server/patches/features/0035-...patch` restores the whole bundle before
   returning a cached file handle or creating a region. It closes a stale cached
   handle first, so a partial eviction cannot leave terrain cached while entity,
@@ -72,6 +74,10 @@ GIT_COMMITTER_NAME='FiestaSMP Engineering' GIT_COMMITTER_EMAIL='noreply@github.c
 On 2026-11-24, a clean checkout at the pinned commit passed both Gradle tasks;
 the generated server and bundler jars contained the restorer, scheduler, and
 offloader classes. This was an isolated build and was not deployed to Fiesta.
+
+A follow-up clean worktree on 2026-11-25 applied patches 0034–0041 and built
+`createMojmapBundlerJar` after the no-I/O cache changes. The generated server
+JAR contains all six helpers. This build was also isolated and was not deployed.
 
 All eight patches are ordered and version-specific. Rebase and rebuild them
 when Paper changes; do not apply them blindly to another Paper release.

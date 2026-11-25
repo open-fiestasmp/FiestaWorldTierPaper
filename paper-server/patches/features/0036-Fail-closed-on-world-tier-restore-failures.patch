@@ -158,7 +158,7 @@ index 376ff223194689b0f359b653744414269daa8e97..eda8434befd697a78d3d3c02854aa895
 +            if (restoreRequired && this.folder.getFileName().toString().equals("region") && !java.nio.file.Files.exists(regionPath)) {
 +                throw new FiestaWorldTierRestoreException("Restored Fiesta world-tier terrain region is missing before write: " + regionPath, null);
 +            }
- 
+             FiestaRegionRestorer.invalidate(this.folder, chunkPos.x, chunkPos.z);
              this.createRegionFile(key);
              FiestaRegionRestorer.invalidate(this.folder, chunkPos.x, chunkPos.z); // Fiesta - clear cached journal state
 
