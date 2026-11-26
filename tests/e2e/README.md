@@ -180,6 +180,26 @@ player-perceived latency test. Keep that delay in mind: cold regions are not
 instant, and automatic production eviction stays disabled until player-facing
 latency is measured and accepted.
 
+On 2026-11-26, a matching Paper and CLI build restored a roughly 2.45 MB
+four-member bundle through Luna SFTP. Paper's callback completed in 5,395 ms
+and verified the gold block, armor stand, lectern, barrel data, terrain,
+entity and POI files, and oversized sidecar. The journal returned to
+`LOCAL_ONLY`; remote test usage returned to zero. The disposable server ran on
+the root filesystem with the 15 GiB local free-space reserve enabled. This is
+still a Paper callback measurement, not a player session or external route
+latency measurement.
+
+A separate comparison fetched a 2,435,026-byte synthetic bundle twice at each
+SFTP download buffer size. The 256 KiB buffer took 1.80 and 2.21 seconds; the
+32 KiB buffer took 2.23 and 2.00 seconds. These four samples do not show a
+clear buffer-size advantage at this bundle size.
+
+An initial callback attempt paired this Paper build with an older CLI that did
+not provide `region-state` and `recover-region`. The marked region stayed
+pending and the run produced no valid callback result. The successful rerun
+used the CLI from the matching source revision. Deploy these Paper and CLI
+changes together before any production pilot.
+
 ## Entity external sidecar
 
 `seed-entity-rich` saves a lectern POI and a persistent armor stand with a
