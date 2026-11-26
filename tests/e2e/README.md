@@ -351,6 +351,18 @@ The object and unique namespace were removed, leaving zero remote usage. This
 checks the SFTP store's cross-client lock and data integrity, not concurrent
 Paper chunk requests or player-facing latency.
 
+A disk-full recovery probe ran `TierManager.restore` against the same real Luna
+SFTP store from a disposable 16 MiB `tmpfs`. The harness filled the filesystem
+to 128 KiB free immediately before the SFTP write for a 512 KiB synthetic
+region. The write failed with `ENOSPC`; the remote marker stayed `RESTORING`,
+no terrain file was published, the temporary stage was removed, and the remote
+object still verified. After removing the filler, retry restored the exact
+bytes, cleared the marker and journal state, deleted the remote object, and
+left the namespace empty. The write surfaced as an `OSError` from the final
+close of the partial file; the fail-closed state and recovery checks passed.
+This tests a small local full filesystem with Luna SFTP, not a full Oracle
+volume or an enforceable Luna account quota.
+
 A separate local-file outage test delivered the target chunk to a localhost
 client 12.473 seconds after client start; Paper's chunk request completed
 13.405 seconds after it began. The test branch also measured a localhost packet
