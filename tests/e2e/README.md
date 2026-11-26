@@ -41,8 +41,7 @@ the client process started. Separately, Paper's cold-chunk request completed
 13.405 seconds after that request began. The fixture used a controlled
 five-second outage and a local file copy. The client timing includes its login
 and retry wait; neither measurement represents Luna SFTP or a player's route to
-Fiesta. The real Luna cold-load path still needs a connected-client
-measurement.
+Fiesta. The Luna cold-load path still needs an external route measurement.
 
 The 2026-11-24 repeat used the per-region cooldown and exit code `75` for the
 five-second injected failure. The fixture ran four times; the chunk future
@@ -316,6 +315,17 @@ observation, not an external route, a concurrent test, or a production eviction
 result. A later SFTP publish timed out after 180 seconds without creating a
 remote object; a simple SFTP read worked afterward. Publishing reliability still
 needs investigation before using this as a latency target.
+
+On 2026-11-27, a fresh disposable Paper server restored a 618,496-byte terrain
+region from Luna over SFTP using a unique test namespace capped at 5 MB. A
+localhost client received the target chunk packet. Paper's test hook reported
+the saved block ready 6,984 ms after it requested the teleport and restore. The
+client received its login packet 9,206 ms after the probe started and the target
+chunk 21,706 ms after start, or about 12.5 seconds after login. This measures a
+client on the Oracle host, not an external player's route. A storage-only repeat
+on a 1,118,415-byte bundle took 18.86 seconds to publish and 2.76 seconds to
+restore. The remote object was removed after restore, and the disposable Luna
+namespace and Oracle world were cleaned up. Production eviction remains off.
 
 A separate local-file outage test delivered the target chunk to a localhost
 client 12.473 seconds after client start; Paper's chunk request completed
