@@ -337,6 +337,13 @@ the test namespace removed. Publish took 15.341 seconds and the valid-bundle
 verification took 2.068 seconds. This covers the real object-store integrity
 path, not Paper's outage handling or player-facing latency.
 
+Two additional disposable publishes used separate Luna namespaces and the
+same 64 KiB synthetic terrain member. One configured a 32 KiB object-store cap;
+the other configured a 200 GiB filesystem-free reserve. Both were rejected
+before upload, reported zero remote object bytes, and had their namespaces
+removed. These exercise the configured application cap and free-space check;
+they do not prove an OS-enforced per-account quota or a physically full disk.
+
 A separate local-file outage test delivered the target chunk to a localhost
 client 12.473 seconds after client start; Paper's chunk request completed
 13.405 seconds after it began. The test branch also measured a localhost packet
