@@ -321,10 +321,10 @@ region from Luna over SFTP using a unique test namespace capped at 5 MB. A
 localhost client received the target chunk packet. Paper's test hook reported
 the saved block ready 6,984 ms after it requested the teleport and restore. The
 client received its login packet 9,206 ms after the probe started and the target
-chunk 21,706 ms after start, or about 12.5 seconds after login. This measures a
-client on the Oracle host, not an external player's route. A storage-only repeat
-on a 1,118,415-byte bundle took 18.86 seconds to publish and 2.76 seconds to
-restore. The remote object was removed after restore, and the disposable Luna
+chunk 21,706 ms after start, or about 12.5 seconds after login. The client ran
+on Oracle over loopback; player-route latency remains unmeasured. A storage-only
+repeat on a 1,118,415-byte bundle took 18.86 seconds to publish and 2.76 seconds
+to restore. The remote object was removed after restore, and the disposable Luna
 namespace and Oracle world were cleaned up. Production eviction remains off.
 
 A separate local-file outage test delivered the target chunk to a localhost
