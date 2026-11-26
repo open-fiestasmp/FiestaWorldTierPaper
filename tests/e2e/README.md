@@ -344,6 +344,13 @@ before upload, reported zero remote object bytes, and had their namespaces
 removed. These exercise the configured application cap and free-space check;
 they do not prove an OS-enforced per-account quota or a physically full disk.
 
+A store-level concurrency probe used four independent clients, each restoring
+the same 64 KiB Luna object into a separate local directory. All four copies
+matched the source checksum; the four fetches completed in 8.406 seconds total.
+The object and unique namespace were removed, leaving zero remote usage. This
+checks the SFTP store's cross-client lock and data integrity, not concurrent
+Paper chunk requests or player-facing latency.
+
 A separate local-file outage test delivered the target chunk to a localhost
 client 12.473 seconds after client start; Paper's chunk request completed
 13.405 seconds after it began. The test branch also measured a localhost packet
