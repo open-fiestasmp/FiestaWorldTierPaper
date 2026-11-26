@@ -327,6 +327,16 @@ repeat on a 1,118,415-byte bundle took 18.86 seconds to publish and 2.76 seconds
 to restore. The remote object was removed after restore, and the disposable Luna
 namespace and Oracle world were cleaned up. Production eviction remains off.
 
+A separate store-integrity probe used the versioned tier client and Luna's
+actual pinned OpenSSH/SFTP connection with a fresh namespace capped at 1 MiB.
+It published a 64 KiB synthetic region, verified it, then replaced the remote
+member with different bytes of the same length. Both verification and restore
+rejected the changed member by checksum; restore left an existing sentinel
+untouched and did not publish the corrupt region. The object was deleted and
+the test namespace removed. Publish took 15.341 seconds and the valid-bundle
+verification took 2.068 seconds. This covers the real object-store integrity
+path, not Paper's outage handling or player-facing latency.
+
 A separate local-file outage test delivered the target chunk to a localhost
 client 12.473 seconds after client start; Paper's chunk request completed
 13.405 seconds after it began. The test branch also measured a localhost packet
