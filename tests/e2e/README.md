@@ -73,6 +73,16 @@ terrain region appeared. This checks that a permanent restore failure does
 not stop Paper or stall unrelated local chunk I/O; it does not measure
 player-facing behavior.
 
+On 2026-11-26, I reran both cases on the compiled Paper 1.21.11 candidate
+built from Paper base `c5eb079` with patches 0034–0041. The permanent-failure
+fixture returned exit code `1` for 22 seconds. Paper stayed up, loaded the
+separate local chunk, made seven restore attempts, kept the marker, and did not
+create the terrain region. Its log had no generic chunk-read error or
+unrecoverable chunk-system failure. In the temporary
+failure case, the fixture returned `75` until enabled; Paper restored the saved
+chunk after four attempts. Both runs used copied disposable data and local
+fixtures, not Luna storage or the live Fiesta server.
+
 On 2026-11-25, `check-markerless-recovery.sh` tested journal lookup when the
 remote region had no marker and no local region file. Its local fixture reported
 `REMOTE`, then held restore at exit code `75`. Paper stayed up, loaded a
