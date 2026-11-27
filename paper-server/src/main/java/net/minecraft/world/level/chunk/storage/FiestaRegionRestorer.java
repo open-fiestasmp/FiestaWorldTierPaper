@@ -8,7 +8,9 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -20,13 +22,17 @@ import java.util.regex.Pattern;
 final class FiestaRegionRestorer {
     private static final String COMMAND_PROPERTY = "fiesta.worldTier.command";
     private static final String CONFIG_PROPERTY = "fiesta.worldTier.config";
+    private static final String JOURNAL_LOOKUP_PROPERTY = "fiesta.worldTier.journalLookupEnabled";
     private static final String TIMEOUT_PROPERTY = "fiesta.worldTier.restoreTimeoutSeconds";
     private static final int RETRY_EXIT_CODE = 75;
     private static final String DEFAULT_COMMAND = "/usr/local/bin/fiesta-world-tier";
     private static final String DEFAULT_CONFIG = "/etc/fiesta-world-tier/config.json";
     private static final long DEFAULT_TIMEOUT_SECONDS = 300L;
+    private static final long STATE_TIMEOUT_SECONDS = 15L;
     private static final Pattern MARKER_STATE = Pattern.compile("\\\"state\\\"\\s*:\\s*\\\"(REMOTE_ONLY|EVICTING|RESTORING)\\\"");
     private static final Object[] LOCKS = new Object[256];
+    private static final Map<Path, RestoreRetryState> RETRIES = new ConcurrentHashMap<>();
+    private static final Map<Path, String> REGION_STATES = new ConcurrentHashMap<>();
 
     static {
         for (int i = 0; i < LOCKS.length; ++i) {
@@ -41,27 +47,65 @@ final class FiestaRegionRestorer {
      * prove that eviction completed: a crash may have deleted only the entity,
      * POI, or oversized-chunk members of the bundle. Invalid markers or marker
      * paths also return true so the I/O path fails closed instead of using
-     * Moonrise's negative cache.
+     * Moonrise's negative cache. When enabled, the journal also identifies
+     * remote regions whose marker path has disappeared.
      */
-    static boolean needsRestore(final Path storageFolder, final int chunkX, final int chunkZ) {
+    static boolean needsRestore(final Path storageFolder, final String dimensionKey, final int chunkX, final int chunkZ) {
+        Path marker = null;
         try {
-            final Path marker = markerPath(storageFolder, chunkX, chunkZ);
+            marker = markerPath(storageFolder, chunkX, chunkZ);
             if (markerAttributesOrNull(marker) == null) {
-                return false;
+                if (!worldTierConfigured()) {
+                    REGION_STATES.put(marker, "NO_MARKER");
+                    return false;
+                }
+                final Path terrainRegion = terrainRegionPath(storageFolder, chunkX, chunkZ);
+                final BasicFileAttributes terrain = attributesOrNull(terrainRegion);
+                final String cachedState = REGION_STATES.get(marker);
+                if ("LOCAL".equals(cachedState) && terrain != null && terrain.isRegularFile()) {
+                    return false;
+                }
+                if ("UNTRACKED".equals(cachedState) && terrain == null) {
+                    return false;
+                }
+                if (cachedState != null) {
+                    REGION_STATES.remove(marker, cachedState);
+                }
+                final String state = runJournalCommand(
+                    storageFolder, dimensionKey, chunkX, chunkZ, "region-state", STATE_TIMEOUT_SECONDS
+                );
+                if ("LOCAL".equals(state) || "UNTRACKED".equals(state)) {
+                    REGION_STATES.put(marker, state);
+                    return false;
+                }
+                return true;
             }
+            REGION_STATES.remove(marker);
             markerState(marker); // validate the durable state before entering recovery
             return true;
         } catch (final IOException | RuntimeException ignored) {
+            if (marker != null) {
+                REGION_STATES.remove(marker);
+            }
             // Force the normal I/O path, where the invalid storage path becomes
             // a visible IOException rather than a cached "no region" result.
             return true;
         }
     }
 
+    static boolean needsRestoreNoIO(final Path storageFolder, final int chunkX, final int chunkZ) {
+        try {
+            final String state = REGION_STATES.get(markerPath(storageFolder, chunkX, chunkZ));
+            return worldTierConfigured() ? !"UNTRACKED".equals(state) : !"NO_MARKER".equals(state);
+        } catch (final IOException | RuntimeException ignored) {
+            return true;
+        }
+    }
+
     /**
-     * Restores a remote-only region if its marker exists. The caller must still
-     * check whether its specific storage component (region/entities/poi) exists:
-     * an original bundle may not have contained entity or POI data.
+     * Restores a remote-only region from its marker or journal state. The caller
+     * must still check whether its specific storage component exists: an original
+     * bundle may not have contained entity or POI data.
      */
     static boolean restoreIfMarked(
         final Path storageFolder,
@@ -85,10 +129,6 @@ final class FiestaRegionRestorer {
         final int chunkZ
     ) throws IOException {
         final Path marker = markerPath(storageFolder, chunkX, chunkZ);
-        if (markerAttributesOrNull(marker) == null) {
-            return false;
-        }
-
         final Path dimensionRoot = storageFolder.toAbsolutePath().normalize().getParent();
         if (dimensionRoot == null) {
             throw new IOException("Cannot determine the world-tier dimension root");
@@ -98,81 +138,222 @@ final class FiestaRegionRestorer {
         final String regionName = "r." + regionX + "." + regionZ + ".mca";
         final Path terrainRegion = dimensionRoot.resolve("region").resolve(regionName);
         final Object lock = LOCKS[(marker.hashCode() & 0x7fffffff) % LOCKS.length];
+        if (!worldTierConfigured() && markerAttributesOrNull(marker) == null) {
+            RETRIES.remove(marker);
+            return localTerrainReady(terrainRegion);
+        }
 
         synchronized (lock) {
-            if (markerAttributesOrNull(marker) == null) {
-                final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
-                if (localTerrain != null && localTerrain.isRegularFile()) {
-                    return true;
-                }
-                throw new IOException("Fiesta world-tier marker disappeared before local data was restored: " + marker);
-            }
-            markerState(marker);
-            final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
-            if (localTerrain != null && !localTerrain.isRegularFile()) {
-                throw new IOException("Local terrain region is not a regular file: " + terrainRegion);
-            }
-            final Path command = configuredPath(COMMAND_PROPERTY, DEFAULT_COMMAND, true);
-            final Path config = configuredPath(CONFIG_PROPERTY, DEFAULT_CONFIG, false);
-            final long timeoutSeconds = timeoutSeconds();
-            final ProcessBuilder builder = new ProcessBuilder(
-                command.toString(),
-                "restore",
-                "--config", config.toString(),
-                "--dimension-key", dimensionKey,
-                "--dimension-root", dimensionRoot.toString(),
-                "--region-x", Integer.toString(regionX),
-                "--region-z", Integer.toString(regionZ)
-            );
-            final Map<String, String> environment = builder.environment();
-            final String path = environment.getOrDefault("PATH", "/usr/local/bin:/usr/bin:/bin");
-            environment.clear();
-            environment.put("PATH", path);
-            environment.put("LANG", "C");
-            environment.put("FIESTA_WORLD_TIER_PAPER", "1");
-            builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-            builder.redirectError(ProcessBuilder.Redirect.INHERIT);
-
-            final Process process;
-            try {
-                process = builder.start();
-            } catch (final IOException ex) {
-                throw new IOException("Could not start the Fiesta world-tier restore command", ex);
-            }
-
-            try {
-                if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-                    process.destroyForcibly();
-                    process.waitFor(Math.min(timeoutSeconds, 10L), TimeUnit.SECONDS);
-                    throw new IOException("Fiesta world-tier restore timed out after " + timeoutSeconds + " seconds");
-                }
-            } catch (final InterruptedException ex) {
-                process.destroyForcibly();
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while restoring a Fiesta world-tier region", ex);
-            }
-
-            final int exitCode = process.exitValue();
-            if (exitCode == RETRY_EXIT_CODE) {
+            final RestoreRetryState retry = RETRIES.computeIfAbsent(marker, ignored -> new RestoreRetryState());
+            if (retry.nextAttemptNanos > System.nanoTime()) {
                 throw new FiestaWorldTierRestoreException(
-                    "Fiesta remote region storage is temporarily unavailable for " + regionName, null, true
+                    "Fiesta world-tier restore is waiting for its region retry window: " + regionName, null, true
                 );
             }
-            if (exitCode != 0) {
-                throw new IOException("Fiesta world-tier restore failed with exit code " + exitCode);
-            }
+            try {
+                if (markerAttributesOrNull(marker) == null) {
+                    if (!worldTierConfigured()) {
+                        RETRIES.remove(marker, retry);
+                        return localTerrainReady(terrainRegion);
+                    }
+                    final String state = runJournalCommand(
+                        storageFolder, dimensionKey, chunkX, chunkZ, "recover-region", timeoutSeconds()
+                    );
+                    if ("UNTRACKED".equals(state)) {
+                        RETRIES.remove(marker, retry);
+                        REGION_STATES.put(marker, state);
+                        return localTerrainReady(terrainRegion);
+                    }
+                    if (!"LOCAL".equals(state) || !localTerrainReady(terrainRegion)) {
+                        throw new IOException("Journal recovery did not restore local terrain for " + regionName);
+                    }
+                    REGION_STATES.remove(marker);
+                    RETRIES.remove(marker, retry);
+                    return true;
+                }
+                REGION_STATES.remove(marker);
+                markerState(marker);
+                final BasicFileAttributes localTerrain = attributesOrNull(terrainRegion);
+                if (localTerrain != null && !localTerrain.isRegularFile()) {
+                    throw new IOException("Local terrain region is not a regular file: " + terrainRegion);
+                }
+                final Path command = configuredPath(COMMAND_PROPERTY, DEFAULT_COMMAND, true);
+                final Path config = configuredPath(CONFIG_PROPERTY, DEFAULT_CONFIG, false);
+                final long timeoutSeconds = timeoutSeconds();
+                final ProcessBuilder builder = new ProcessBuilder(
+                    command.toString(),
+                    "restore",
+                    "--config", config.toString(),
+                    "--dimension-key", dimensionKey,
+                    "--dimension-root", dimensionRoot.toString(),
+                    "--region-x", Integer.toString(regionX),
+                    "--region-z", Integer.toString(regionZ)
+                );
+                final Map<String, String> environment = builder.environment();
+                final String path = environment.getOrDefault("PATH", "/usr/local/bin:/usr/bin:/bin");
+                environment.clear();
+                environment.put("PATH", path);
+                environment.put("LANG", "C");
+                environment.put("FIESTA_WORLD_TIER_PAPER", "1");
+                builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+                builder.redirectError(ProcessBuilder.Redirect.INHERIT);
 
-            if (markerAttributesOrNull(marker) != null) {
-                throw new IOException("Fiesta world-tier restore command did not clear the marker after publishing local data");
+                final Process process;
+                try {
+                    process = builder.start();
+                } catch (final IOException ex) {
+                    throw new IOException("Could not start the Fiesta world-tier restore command", ex);
+                }
+
+                try {
+                    if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                        destroyProcessTree(process);
+                        throw new IOException("Fiesta world-tier restore timed out after " + timeoutSeconds + " seconds");
+                    }
+                } catch (final InterruptedException ex) {
+                    destroyProcessTree(process);
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while restoring a Fiesta world-tier region", ex);
+                }
+
+                final int exitCode = process.exitValue();
+                if (exitCode == RETRY_EXIT_CODE) {
+                    throw new FiestaWorldTierRestoreException(
+                        "Fiesta remote region storage is temporarily unavailable for " + regionName, null, true
+                    );
+                }
+                if (exitCode != 0) {
+                    throw new IOException("Fiesta world-tier restore failed with exit code " + exitCode);
+                }
+
+                if (markerAttributesOrNull(marker) != null) {
+                    throw new IOException("Fiesta world-tier restore command did not clear the marker after publishing local data");
+                }
+                final BasicFileAttributes attributes = attributesOrNull(terrainRegion);
+                if (attributes == null) {
+                    throw new IOException("Restore completed without publishing the expected terrain region " + regionName);
+                }
+                if (!attributes.isRegularFile()) {
+                    throw new IOException("Restored terrain region is not a regular file: " + regionName);
+                }
+                RETRIES.remove(marker, retry);
+                return true;
+            } catch (final IOException | RuntimeException ex) {
+                retry.recordFailure();
+                throw new FiestaWorldTierRestoreException("Fiesta world-tier region recovery failed", ex, true);
             }
-            final BasicFileAttributes attributes = attributesOrNull(terrainRegion);
-            if (attributes == null) {
-                throw new IOException("Restore completed without publishing the expected terrain region " + regionName);
+        }
+    }
+
+    private static boolean localTerrainReady(final Path terrainRegion) throws IOException {
+        final BasicFileAttributes attributes = attributesOrNull(terrainRegion);
+        if (attributes == null) {
+            return false;
+        }
+        if (!attributes.isRegularFile()) {
+            throw new IOException("Local terrain region is not a regular file: " + terrainRegion);
+        }
+        return true;
+    }
+
+    static void invalidate(final Path storageFolder, final int chunkX, final int chunkZ) throws IOException {
+        REGION_STATES.remove(markerPath(storageFolder, chunkX, chunkZ));
+    }
+
+    private static Path terrainRegionPath(final Path storageFolder, final int chunkX, final int chunkZ) throws IOException {
+        final Path normalized = storageFolder.toAbsolutePath().normalize();
+        final Path dimensionRoot = normalized.getParent();
+        if (dimensionRoot == null) {
+            throw new IOException("Cannot determine the world-tier dimension root");
+        }
+        return dimensionRoot.resolve("region").resolve("r." + (chunkX >> 5) + "." + (chunkZ >> 5) + ".mca");
+    }
+
+    private static boolean worldTierConfigured() {
+        return Boolean.parseBoolean(System.getProperty(JOURNAL_LOOKUP_PROPERTY, "false"));
+    }
+
+    private static String runJournalCommand(
+        final Path storageFolder,
+        final String dimensionKey,
+        final int chunkX,
+        final int chunkZ,
+        final String operation,
+        final long timeoutSeconds
+    ) throws IOException {
+        final Path marker = markerPath(storageFolder, chunkX, chunkZ);
+        final Path dimensionRoot = marker.getParent().getParent().getParent();
+        final Path command = configuredPath(COMMAND_PROPERTY, DEFAULT_COMMAND, true);
+        final Path config = configuredPath(CONFIG_PROPERTY, DEFAULT_CONFIG, false);
+        final ProcessBuilder builder = new ProcessBuilder(
+            command.toString(),
+            operation,
+            "--config", config.toString(),
+            "--dimension-key", dimensionKey,
+            "--dimension-root", dimensionRoot.toString(),
+            "--region-x", Integer.toString(chunkX >> 5),
+            "--region-z", Integer.toString(chunkZ >> 5)
+        );
+        final Map<String, String> environment = builder.environment();
+        final String path = environment.getOrDefault("PATH", "/usr/local/bin:/usr/bin:/bin");
+        environment.clear();
+        environment.put("PATH", path);
+        environment.put("LANG", "C");
+        builder.redirectError(ProcessBuilder.Redirect.INHERIT);
+
+        final Process process;
+        try {
+            process = builder.start();
+        } catch (final IOException ex) {
+            throw new IOException("Could not start the Fiesta world-tier journal command", ex);
+        }
+        try {
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                destroyProcessTree(process);
+                throw new IOException("Fiesta world-tier journal command timed out after " + timeoutSeconds + " seconds");
             }
-            if (!attributes.isRegularFile()) {
-                throw new IOException("Restored terrain region is not a regular file: " + regionName);
+            if (process.exitValue() == RETRY_EXIT_CODE) {
+                throw new FiestaWorldTierRestoreException("Fiesta world-tier recovery is temporarily unavailable", null, true);
             }
-            return true;
+            if (process.exitValue() != 0) {
+                throw new IOException("Fiesta world-tier journal command failed with exit code " + process.exitValue());
+            }
+            final byte[] output = process.getInputStream().readNBytes(64);
+            if (output.length == 64 || process.getInputStream().read() != -1) {
+                throw new IOException("Fiesta world-tier journal command output exceeded its limit");
+            }
+            final String state = new String(output, java.nio.charset.StandardCharsets.US_ASCII).trim();
+            if (!state.equals("LOCAL") && !state.equals("REMOTE") && !state.equals("TRACKED_MISSING")
+                && !state.equals("UNTRACKED")) {
+                throw new IOException("Fiesta world-tier journal command returned an invalid region state");
+            }
+            return state;
+        } catch (final InterruptedException ex) {
+            destroyProcessTree(process);
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted during a Fiesta world-tier journal command", ex);
+        }
+    }
+
+    static void destroyProcessTree(final Process process) {
+        process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+        try {
+            process.waitFor(10L, TimeUnit.SECONDS);
+        } catch (final InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static final class RestoreRetryState {
+        private int failures;
+        private long nextAttemptNanos;
+
+        private void recordFailure() {
+            this.failures = Math.min(this.failures + 1, 6);
+            final long maximumDelay = Math.min(5_000L, 1_000L << (this.failures - 1));
+            final long delay = ThreadLocalRandom.current().nextLong(maximumDelay * 3L / 4L, maximumDelay + 1L);
+            this.nextAttemptNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(delay);
         }
     }
 

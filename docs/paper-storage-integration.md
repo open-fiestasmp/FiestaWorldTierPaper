@@ -8,6 +8,22 @@ returning no data, or creating a new region. It also checks the marker before
 trusting Moonrise's negative cache. Any marker triggers recovery, because a
 surviving terrain `.mca` does not prove that the entity, POI, or oversized chunk
 files survived an interrupted eviction.
+
+Before enabling any offload, set
+`-Dfiesta.worldTier.journalLookupEnabled=true` and install the matching
+companion CLI. When a marker is absent, Paper consults the durable region
+journal before treating a missing region as new. Journaled remote regions are
+restored even if their marker was lost; journaled local regions with missing
+terrain fail closed. A region absent from the journal remains eligible for
+normal world generation. The lookup is cached for local and untracked regions,
+then cleared when Paper creates or offloads the region. Moonrise's no-I/O
+negative-cache check reads only this in-memory classification; an unknown region
+stays possibly present until the regular I/O path checks its marker or journal.
+Run `fiesta-world-tier catalog --config /etc/fiesta-world-tier/config.json`
+before enabling this JVM property so the journal exists and local region
+history is initialized. Keep the journal with the world-tier config and include
+it in backups. Paper refuses to start an offload snapshot or finalize eviction
+while journal lookup is disabled.
 The child receives an argument vector (no shell), a minimal environment, a
 bounded timeout, and a private configuration path. A failed restore is marked
 with a dedicated I/O exception. Moonrise preserves that exception through the
@@ -45,6 +61,7 @@ command/config paths and timeout can be overridden with these JVM properties:
 ```text
 -Dfiesta.worldTier.command=/usr/local/bin/fiesta-world-tier
 -Dfiesta.worldTier.config=/etc/fiesta-world-tier/config.json
+-Dfiesta.worldTier.journalLookupEnabled=true
 -Dfiesta.worldTier.restoreTimeoutSeconds=300
 -Dfiesta.worldTier.offloadTimeoutSeconds=3600
 -Dfiesta.worldTier.accessWriteIntervalMillis=60000
@@ -77,6 +94,11 @@ state even if some local files exist, so an interrupted eviction or multi-file
 restore cannot be mistaken for a complete bundle. Paper closes any cached
 region handle before invoking recovery, then opens a fresh handle only after
 full-bundle verification.
+
+When the marker is missing, the `region-state` command performs a read-only
+journal lookup. The `recover-region` command uses that state to restore a remote
+bundle, reject missing terrain recorded as local, or allow an untracked region
+to follow normal generation. A missing or unreadable journal fails closed.
 
 ## Scope and current safety boundary
 
@@ -197,12 +219,14 @@ Later saved-chunk testing against Luna passed, with an 8.5-second restore.
 Automatic offloading remains disabled on Fiesta until crash recovery and
 player-facing movement/latency are tested on disposable copies.
 
-The integration is intentionally fail-closed. If the marker, command,
-configuration, SSH host key, remote bundle, checksum, quota, or local disk
-reserve check fails, the operation returns a typed I/O error and leaves the
-world files untouched. Paper/Moonrise fails the chunk task and stops the server
-with a crash report; restore the remote service and retry server startup. Keep
-a separate complete backup before any production rollout.
+The restore path is fail-closed. If the marker, command, configuration, SSH host
+key, remote bundle, checksum, or local disk check fails, Paper leaves the region
+marked and does not treat it as empty terrain. The chunk load stays pending and
+retries while unrelated local chunks can continue loading. Disposable tests
+cover helper failures and process restart. Luna-side outages and a connected
+player's cold-load wait still need testing. Keep automatic eviction disabled
+until those gaps are tested, and keep a verified independent backup before a
+production rollout.
 
 ### Paper chunk-load restore with streamed Luna download
 
@@ -233,3 +257,33 @@ A fresh Paper process loaded the saved gold block successfully. The unique
 remote and local test roots were then removed. This validates fail-closed
 outage behavior and a later retry on disposable data, but not a process crash
 during transfer, live-player latency, or production rollout.
+
+On 2026-11-24, a separate disposable test repeatedly returned exit code `1`
+from the restore command. Paper kept the chunk pending, left the marker in
+place, and continued loading an unrelated saved chunk. A per-region retry
+cooldown limited the helper to three calls during the five-second injected
+outage. After the fixture was allowed to restore the saved data, Paper loaded
+the gold block and cleared the marker in 6.6 seconds. This checks a local
+fixture, not Luna failure handling or player-facing latency.
+
+A second 2026-11-24 run returned exit code `75` during the same five-second
+injected failure window. The helper ran four times; Paper completed the chunk
+future in 12.25 seconds and restored the saved block. The delay includes the
+injected outage and is not a player-route latency measurement.
+
+A 2026-11-24 disposable crash/restart test force-stopped Paper while a marked
+region had no local terrain file and the restore fixture returned an error.
+The marker and absent terrain file survived the process stop. After restart,
+Paper retried the fixture, loaded an unrelated saved chunk, then restored the
+saved gold-block chunk when the fixture recovered. This confirms marker-based
+recovery across a process crash on local disposable data; it does not test a
+crash during transfer or a production restart. The repeatable probe is
+[`check-restore-crash-restart.sh`](../tests/e2e/check-restore-crash-restart.sh).
+In its 2026-11-24 exit-code-`1` run, two restore calls occurred before the
+forced stop and six total before recovery. An exit-code-`75` run made three
+calls before the forced stop and seven total before recovery.
+
+The marker fixture also forces a one-second restore timeout while the helper
+has a child process writing to a liveness file. It checks the helper's child
+stops, the remote marker remains, and no terrain file is published. This
+verifies local process cleanup; it does not simulate a network outage.

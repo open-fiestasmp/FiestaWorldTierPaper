@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FiestaSMP Engineering <noreply@github.com>
-Subject: [PATCH] Retry transient world-tier restore failures
+Subject: [PATCH] Retry world-tier restore failures without stopping Paper
 
 ---
 
@@ -62,12 +62,12 @@ diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/Generi
 +                @Override
 +                public void accept(final CompoundTag data, final Throwable thr) {
 +                    final FiestaWorldTierRestoreException restoreFailure = FiestaWorldTierRestoreException.find(thr);
-+                    if (restoreFailure != null && restoreFailure.isRetryable()) {
++                    if (restoreFailure != null) {
 +                        final int attempt = retryAttempts.incrementAndGet();
-+                        final long maximumDelay = Math.min(30_000L, 1_000L << Math.min(attempt - 1, 5));
++                        final long maximumDelay = Math.min(5_000L, 1_000L << Math.min(attempt - 1, 5));
 +                        final long delay = ThreadLocalRandom.current().nextLong(maximumDelay * 3L / 4L, maximumDelay + 1L);
 +                        if (attempt == 1 || attempt % 10 == 0) {
-+                            LOGGER.warn("Remote restore is unavailable for {} chunk ({}, {}) {}; retrying in {}ms (attempt {})",
++                            LOGGER.warn("World-tier restore is unavailable for {} chunk ({}, {}) {}; retrying in {}ms (attempt {})",
 +                                WorldUtil.getWorldName(LoadDataFromDiskTask.this.world),
 +                                LoadDataFromDiskTask.this.chunkX, LoadDataFromDiskTask.this.chunkZ,
 +                                LoadDataFromDiskTask.this.type, delay, attempt);

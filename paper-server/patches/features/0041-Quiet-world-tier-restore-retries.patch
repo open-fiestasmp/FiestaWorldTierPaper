@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: FiestaSMP Engineering <noreply@github.com>
-Subject: [PATCH] Quiet retryable world-tier read errors
+Subject: [PATCH] Quiet world-tier read retry errors
 
 ---
 
@@ -21,7 +21,7 @@ diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/io/MoonriseRegionFileI
                      throwable = thr;
 -                    LOGGER.error("Failed to read chunk data for task: " + this.toString(), thr);
 +                    final FiestaWorldTierRestoreException restoreFailure = FiestaWorldTierRestoreException.find(thr);
-+                    if (restoreFailure == null || !restoreFailure.isRetryable()) {
++                    if (restoreFailure == null) {
 +                        LOGGER.error("Failed to read chunk data for task: " + this.toString(), thr);
 +                    }
                  }
