@@ -219,12 +219,14 @@ Later saved-chunk testing against Luna passed, with an 8.5-second restore.
 Automatic offloading remains disabled on Fiesta until crash recovery and
 player-facing movement/latency are tested on disposable copies.
 
-The integration is intentionally fail-closed. If the marker, command,
-configuration, SSH host key, remote bundle, checksum, quota, or local disk
-reserve check fails, the operation returns a typed I/O error and leaves the
-world files untouched. Paper/Moonrise fails the chunk task and stops the server
-with a crash report; restore the remote service and retry server startup. Keep
-a separate complete backup before any production rollout.
+The restore path is fail-closed. If the marker, command, configuration, SSH host
+key, remote bundle, checksum, or local disk check fails, Paper leaves the region
+marked and does not treat it as empty terrain. The chunk load stays pending and
+retries while unrelated local chunks can continue loading. Disposable tests
+cover helper failures and process restart, but not a Luna-side outage or a
+connected player's cold-load wait. Keep automatic eviction disabled until those
+gaps are tested, and keep a verified independent backup before a production
+rollout.
 
 ### Paper chunk-load restore with streamed Luna download
 
