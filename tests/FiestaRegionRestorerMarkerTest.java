@@ -88,6 +88,7 @@ public final class FiestaRegionRestorerMarkerTest {
         }
         checkConcurrentRestore();
         checkRestoreTimeoutKillsChildren();
+        checkOffloadTimeoutKillsChildren();
         checkOffloadRequiresJournalLookup();
         checkNoIoJournalLookup();
         checkJournalRecoveryWithoutMarker();
@@ -418,6 +419,68 @@ public final class FiestaRegionRestorerMarkerTest {
             System.clearProperty("fiesta.worldTier.command");
             System.clearProperty("fiesta.worldTier.config");
             System.clearProperty("fiesta.worldTier.restoreTimeoutSeconds");
+            if (Files.isRegularFile(childPid)) {
+                final long pid = Long.parseLong(Files.readString(childPid).trim());
+                ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+            }
+            try (var paths = Files.walk(dimension)) {
+                for (final Path path : paths.sorted((left, right) -> right.compareTo(left)).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
+        }
+    }
+
+    private static void checkOffloadTimeoutKillsChildren() throws Exception {
+        final Path dimension = Files.createTempDirectory("fiesta-region-offload-timeout-");
+        final Path config = Files.writeString(dimension.resolve("offload-config.json"), "{}\n");
+        final Path command = dimension.resolve("offload-command.sh");
+        final Path childScript = dimension.resolve("offload-child.py");
+        final Path childPid = dimension.resolve("offload-child.pid");
+        final Path ticks = dimension.resolve("offload-child-ticks.log");
+        Files.writeString(childScript,
+            "import sys, time\n"
+                + "while True:\n"
+                + "    with open(sys.argv[1], 'a', encoding='utf-8') as output:\n"
+                + "        output.write('tick\\n')\n"
+                + "    time.sleep(0.05)\n");
+        Files.writeString(command, "#!/bin/sh\n"
+            + "set -eu\n"
+            + "python3 '" + childScript + "' '" + ticks + "' &\n"
+            + "child=$!\n"
+            + "printf '%s\\n' \"$child\" > '" + childPid + "'\n"
+            + "wait \"$child\"\n");
+        Files.setPosixFilePermissions(command, PosixFilePermissions.fromString("rwx------"));
+
+        final String oldCommand = System.getProperty("fiesta.worldTier.command");
+        final String oldConfig = System.getProperty("fiesta.worldTier.config");
+        final String oldLookup = System.getProperty("fiesta.worldTier.journalLookupEnabled");
+        final String oldTimeout = System.getProperty("fiesta.worldTier.offloadTimeoutSeconds");
+        System.setProperty("fiesta.worldTier.command", command.toString());
+        System.setProperty("fiesta.worldTier.config", config.toString());
+        System.setProperty("fiesta.worldTier.journalLookupEnabled", "true");
+        System.setProperty("fiesta.worldTier.offloadTimeoutSeconds", "1");
+
+        try {
+            boolean failed = false;
+            try {
+                FiestaRegionOffloader.snapshot(dimension, "minecraft:overworld", 0, 0, "timeout-test");
+            } catch (final IOException expected) {
+                failed = expected.getMessage().contains("timed out");
+            }
+            check(failed, "the offload command must fail after its timeout");
+            check(Files.isRegularFile(childPid), "the offload fixture child did not start");
+            check(Files.isRegularFile(ticks), "the offload fixture child did not write its liveness log");
+            Thread.sleep(300L);
+            final int stableCount = Files.readAllLines(ticks).size();
+            Thread.sleep(300L);
+            check(Files.readAllLines(ticks).size() == stableCount,
+                "the offload child continued running after its parent timed out");
+        } finally {
+            restoreProperty("fiesta.worldTier.command", oldCommand);
+            restoreProperty("fiesta.worldTier.config", oldConfig);
+            restoreProperty("fiesta.worldTier.journalLookupEnabled", oldLookup);
+            restoreProperty("fiesta.worldTier.offloadTimeoutSeconds", oldTimeout);
             if (Files.isRegularFile(childPid)) {
                 final long pid = Long.parseLong(Files.readString(childPid).trim());
                 ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);

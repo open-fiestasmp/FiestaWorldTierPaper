@@ -130,8 +130,7 @@ public final class FiestaRegionOffloader {
         final long timeout = timeoutSeconds();
         try {
             if (!process.waitFor(timeout, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                process.waitFor(Math.min(timeout, 10L), TimeUnit.SECONDS);
+                FiestaRegionRestorer.destroyProcessTree(process);
                 throw new IOException("Fiesta world-tier operation timed out after " + timeout + " seconds");
             }
             if (process.exitValue() != 0) {
@@ -146,7 +145,7 @@ public final class FiestaRegionOffloader {
             }
             return new String(output, StandardCharsets.US_ASCII);
         } catch (final InterruptedException ex) {
-            process.destroyForcibly();
+            FiestaRegionRestorer.destroyProcessTree(process);
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted during a Fiesta world-tier operation", ex);
         }

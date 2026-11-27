@@ -335,7 +335,7 @@ final class FiestaRegionRestorer {
         }
     }
 
-    private static void destroyProcessTree(final Process process) {
+    static void destroyProcessTree(final Process process) {
         process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
         process.destroyForcibly();
         try {
