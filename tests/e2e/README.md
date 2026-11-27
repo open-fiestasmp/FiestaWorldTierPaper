@@ -209,6 +209,15 @@ pending and the run produced no valid callback result. The successful rerun
 used the CLI from the matching source revision. Deploy these Paper and CLI
 changes together before any production pilot.
 
+On 2026-11-27, the exact public Paper PR build at `2bf45d8` restored a
+synthetic rich-region bundle through Luna's real SFTP and SSH path. Paper
+verified the terrain, entity, POI, barrel payload, and oversized `.mcc`
+sidecar; its callback reported `FULL_DATA_RESTORED:16891ms`. The recovery
+journal returned to `LOCAL_ONLY`, and the isolated test namespace was removed
+with zero remote bytes left. This exercised the remote round trip, not a real
+world region, player login, or player-facing latency. The separate 16.9-second
+callback result still needs a player-facing cold-load test before any pilot.
+
 ## Entity external sidecar
 
 `seed-entity-rich` saves a lectern POI and a persistent armor stand with a
