@@ -223,10 +223,10 @@ The restore path is fail-closed. If the marker, command, configuration, SSH host
 key, remote bundle, checksum, or local disk check fails, Paper leaves the region
 marked and does not treat it as empty terrain. The chunk load stays pending and
 retries while unrelated local chunks can continue loading. Disposable tests
-cover helper failures and process restart, but not a Luna-side outage or a
-connected player's cold-load wait. Keep automatic eviction disabled until those
-gaps are tested, and keep a verified independent backup before a production
-rollout.
+cover helper failures and process restart. Luna-side outages and a connected
+player's cold-load wait still need testing. Keep automatic eviction disabled
+until those gaps are tested, and keep a verified independent backup before a
+production rollout.
 
 ### Paper chunk-load restore with streamed Luna download
 
